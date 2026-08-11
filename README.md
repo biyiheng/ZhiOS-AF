@@ -93,6 +93,26 @@ python tools/verify_release.py          # 期望输出 RELEASE VERIFY ALL PASS
 汇编级参考模板（向量表/复位、PendSV 上下文切换、LDREX/STREX、位带、WFI 低功耗）位于
 `bsp/stm32h743/startup_stm32h743.s` 与 `bsp/stm32h743/port_context_switch.s`。
 
+### arm-none-eabi 链接验证与 QEMU 亚微秒切换/Jitter 压测
+
+用真实 `arm-none-eabi` 工具链验证汇编启动/上下文切换模板，并在 QEMU 上做
+上下文切换亚微秒切换与 Jitter 自动化压测（`tools/arm_eabi/`）：
+
+```bash
+./tools/arm_eabi/build_verify.sh            # M7 链接验证 + M3 QEMU 镜像（Windows 用 .ps1）
+python3 tools/arm_eabi/stress_sched.py --build --runs 20   # 自动化压测，强制 <1μs 切换 + jitter 门槛
+```
+
+本机已用 STM32CubeIDE 内嵌 `arm-none-eabi-gcc` 实测通过 M7/M3 汇编、链接，
+向量表置于 0x00000000 且 PendSV/原子符号齐全。QEMU 压测需安装 `qemu-system-arm`，
+真板可用 J-Link/GDB/串口接入同一统计判定（详见 `tools/arm_eabi/README.md`）。
+
+## AI-Agent 技术指标体系
+
+面向辅助嵌入式 OS 开发的 AI Agent（硬件亲和性 / 实时代码生成 / 诊断精度 /
+工具链协同 / 安全合规 五大维度）的指标、硬性门槛与落实路径见
+《[34-AI-Agent技术指标体系设计文档](../docs/34-AI-Agent技术指标体系设计文档.md)》。
+
 ## 发布说明（Release）
 
 当前版本 **v1.1.0**，归档于 `release` 分支（完整可独立部署快照）。详见

@@ -52,6 +52,14 @@
 - 新增汇编级参考模板：`bsp/stm32h743/startup_stm32h743.s`（向量表/复位/故障转储）、`bsp/stm32h743/port_context_switch.s`（PendSV 切换/LDREX-STREX/位带/WFI 低功耗）。
 - 对核心内核/HAL/BSP/RTOS 端口补充统一「模块说明（维护入口）」注释；调度器新增 `ZHIO_CFG_SCHED_TRACE` 调度决策/抖动周期测量。
 
+### 2.7 arm-none-eabi 链接验证 + QEMU 亚微秒切换/Jitter 压测 + GitHub 上传准备
+- 新增 `tools/arm_eabi/`：`verify_flash.ld`（向量表@0/DWT CYCCNT 钉址）、`verify_main.c`（上下文切换周期采样固件）、`build_verify.sh`/`.ps1`（自动探测 STM32CubeIDE 内嵌工具链）、`stress_sched.py`（自动化压测）。
+- **链接验证**：用真实 `arm-none-eabi-gcc` 对 `startup_stm32h743.s` / `port_context_switch.s` 汇编并链接为 ELF，向量表 `0x00000000`=栈顶、`0x04`=Reset_Handler、PendSV/原子符号齐全（本机实测通过）。
+- **自动化压测**：`stress_sched.py` 在 QEMU（mps2-an385）多轮采样上下文切换周期，统计 mean/max/jitter，强制判定 **<1μs 切换** 与 **jitter 占比** 门槛；真板可用 J-Link/GDB/串口接入同一判定。
+- **trace 宏统一**：调度器 `ZHIO_CFG_SCHED_TRACE` 之外，为 `tensor_mem.c` 新增 `ZHIO_CFG_MEM_TRACE` 分配周期测量；`kernel.c`/`npu_dsp.c`/`message_bus.c`/host RTOS 端口补齐「模块说明（维护入口）」头块。
+- **GitHub 上传准备**：新增 `LICENSE`(Apache-2.0)、`CONTRIBUTING.md`、`SECURITY.md`、`.gitattributes`、`.github/workflows/ci.yml`（build/test/sim/e2e/cppcheck + arm-none-eabi 链接验证 + QEMU 压测）。
+- 新增《34-AI-Agent技术指标体系设计文档》：五大维度（硬件亲和性/代码生成质量/诊断精度/工具链协同/安全合规）+ 硬性门槛 + 自检对照 + 落实路径。
+
 ---
 
 ## 3. 本版本修复的 Bug
@@ -77,6 +85,8 @@
 | 部署脚本语法 | `run_integration.sh` / `run_integration.ps1` / `run_wsl_deploy.sh` 校验通过 |
 | 数据库迁移 `migrate.py` | 新建 / 升级 / 幂等均 OK |
 | 训练链路 | 5 个 Agent 测试准确率 0.90+（真实爬虫数据） |
+| `arm-none-eabi` 汇编链接验证 | `build_verify.sh` M7/M3 链接通过，向量表/符号核验正确 |
+| `tools/arm_eabi/stress_sched.py` | 语法/参数校验通过；本机无 QEMU 时正确报错并给出引导 |
 
 > 说明：本机（Windows）未运行 Docker 引擎（WSL2 后端缺失），真实容器部署需在具备 Docker 的 WSL2/Linux 环境
 > 通过 `tools/run_wsl_deploy.sh` 或 `tools/run_integration.sh` 执行；端到端 + 压力流程已通过本地等价 `e2e_test.py` 验证。

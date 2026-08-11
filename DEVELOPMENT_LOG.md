@@ -557,3 +557,70 @@ cmake --build build
 | 新增文档 | `docs/33-操作系统技术指标体系设计文档.md` |
 | 新增模板 | `bsp/stm32h743/startup_stm32h743.s`、`bsp/stm32h743/port_context_switch.s` |
 | 修改注释/优化 | `ai_kernel/inference_scheduler/inference_scheduler.c`、`ai_kernel/tensor_mem/tensor_mem.c`、`hal/hal_host.c`、`bsp/stm32h743/hal_stm32h743.c`、`bsp/stm32h743/board.c`、`bsp/stm32h743/FreeRTOSConfig.h`、`rtos/freertos/zhio_rtos_port.c` |
+
+---
+
+## 17. 第十阶段：arm-none-eabi 链接验证 + QEMU 亚微秒切换/Jitter 压测 + trace 宏统一 + GitHub 上传准备 + AI-Agent 指标体系（2026-08-12）
+
+### 17.1 本地编译脚本（arm-none-eabi）与汇编链接/运行验证
+- 新增 [tools/arm_eabi/](zhi-os-af/tools/arm_eabi/)：
+  - `verify_flash.ld`：通用链接脚本，向量表置于 `0x00000000`（首字=栈顶 `_estack`，次字=`Reset_Handler`），
+    并将 `DWT->CYCCNT` 周期计数器"钉"到固定地址 `0xE0001004`（`.dwt_cyccnt` 段）。
+  - `verify_main.c`：冒烟固件，复刻 PendSV 关键路径（MRS PSP / STMDB R4-R11 / LDMIA / MSR PSP），
+    采样 1000 次上下文切换周期并输出 CSV，同时做原子/屏障/位带自检。
+  - `build_verify.sh` / `build_verify.ps1`：自动探测 STM32CubeIDE 内嵌 `arm-none-eabi-gcc`，
+    汇编 `startup_stm32h743.s` + `port_context_switch.s` 并链接为 ELF；M7 链接验证 + M3 QEMU 镜像两路产出；
+    可选 `-Run` / `--run` 调用 QEMU。
+- **本机实测（Windows）**：用真实 `arm-none-eabi-gcc` 对汇编源汇编、链接通过，
+  向量表 `0x00000000`=栈顶、`0x04`=`Reset_Handler`、PendSV/原子符号齐全。
+
+### 17.2 QEMU / 真板自动化压测方案（亚微秒切换 + Jitter）
+- 新增 [tools/arm_eabi/stress_sched.py](zhi-os-af/tools/arm_eabi/stress_sched.py)：
+  - 多轮（默认 20）运行 QEMU（mps2-an385，Cortex-M3），解析 `sw_cycles,<n>` 与 `SW_SUMMARY` 输出；
+  - 统计 mean/min/max/jitter，按 CPU 频率换算为纳秒；
+  - 强制判定 **平均切换 <1μs** 与 **jitter 占比 < 上限（默认 10%，真板可收紧到 1%）**，任一不满足即退出非 0。
+  - `--freq` 支持真板频率（如 STM32H743 填 480000000），真板可用 J-Link/GDB/串口输出同一 CSV 接入判定。
+
+### 17.3 trace 宏统一到调度器与内存管理核心 C 文件
+- 除既有 `ZHIO_CFG_SCHED_TRACE`（调度决策周期）外：
+  - [tensor_mem.c](zhi-os-af/ai_kernel/tensor_mem/tensor_mem.c) 新增 `ZHIO_CFG_MEM_TRACE` 与 `mem_cycles_now()`，
+    测量 `xAllocTensor` 单次分配周期（目标 <200 周期），记录最坏分配延迟；
+  - [kernel.c](zhi-os-af/kernel/kernel.c)、[npu_dsp.c](zhi-os-af/ai_kernel/npu_dsp/npu_dsp.c)、
+    [message_bus.c](zhi-os-af/agent/message_bus/message_bus.c)、[rtos/host/zhio_rtos_port.c](zhi-os-af/rtos/host/zhio_rtos_port.c)
+    补齐「模块说明（维护入口）」头块，与调度/内存模块保持统一格式。
+- 上述均为受宏保护/纯注释改动，不改公开 API。
+
+### 17.4 GitHub 上传准备
+- 新增 `LICENSE`（Apache-2.0）、`CONTRIBUTING.md`（代码规范/流程/提交规范/测试要求/安全）、
+  `SECURITY.md`（版本支持/漏洞报告/已知安全基线/披露流程）、`.gitattributes`（LF 行尾统一）、`.gitignore`（排除构建/缓存/数据库）。
+- 新增 [.github/workflows/ci.yml](zhi-os-af/.github/workflows/ci.yml)：
+  - `build-test` 作业：host 构建 + ZTEST 单测 + cppcheck 静态分析（MISRA/CERT-C 基线）+ Python 逻辑仿真 +
+    Agent 控制软件 E2E（66 断言）+ release 可部署性自检；
+  - `arm-verify` 作业：安装 `gcc-arm-none-eabi` + `qemu-system-arm` → 汇编链接验证（M7+M3）→ QEMU 抖动压测。
+
+### 17.5 AI-Agent 技术指标体系文档（自检对照）
+- 新增 [docs/34-AI-Agent技术指标体系设计文档.md](docs/../docs/34-AI-Agent技术指标体系设计文档.md)
+  （编号 ZHIOS-AF-SPEC-034）：面向辅助嵌入式 OS 开发的 AI Agent，围绕**五大维度**设硬性门槛：
+  - D1 底层硬件亲和性（硬件知识幻觉率 <0.5%）；
+  - D2 实时代码生成质量（一次编译通过率 ≥98%、MISRA C:2012 ≥99%、CERT C 违规 0、栈帧 8 字节对齐、ABI 严格匹配、无数据竞争/优先级反转）；
+  - D3 系统级诊断精度（寄存器现场+故障地址关联 ≥95%、性能退化根因首命中 ≥90%）；
+  - D4 工具链协同效率（Makefile/CMake/LDS 一次可用率 ≥97%、JTAG/SWD 调用成功率 ≥99%）；
+  - D5 安全合规（禁生成溢出/回绕/空指针/TOCTOU、漏洞检出 100%、SMEP/SMAP/MPU/NX 建议准确率 ≥98%、离线索引）。
+  - 另含实时响应（首 Token P99<600ms、单轮<2s、多文件首版<20s、可用性≥99.9%）、
+    上下文保持（50 轮跨轮一致 ≥97%）、轨迹准确性（Trajectory Accuracy ≥90%）。
+- 每项给出「自检对照」：✅ 已落地 / 🟡 差距，如实标注（如 RISC-V/x86 参考集、故障转储解析流水线、
+  OpenOCD/J-Link 自动化、MPU/Canary/看门狗/签名 Bootloader 为后续落地项），并附落实路径 Roadmap（P1–P6）。
+
+### 17.6 验证汇总（本阶段）
+| 项 | 结果 |
+| --- | --- |
+| `tools/arm_eabi/build_verify.sh` | M7 汇编+链接通过，向量表/符号核验正确（本机实测） |
+| `tools/arm_eabi/stress_sched.py` | 语法/参数校验通过；本机无 QEMU 时正确报错并给出引导 |
+| trace 宏统一 | 仅宏保护/注释改动，`python tools/sim/zhio_sim.py` 无回归 |
+| GitHub 文件 | `ci.yml`（YAML 合法）、LICENSE/CONTRIBUTING/SECURITY/.gitattributes 就绪 |
+
+### 17.7 本阶段新增/修改文件
+| 类型 | 文件 |
+| --- | --- |
+| 新增 | `tools/arm_eabi/*`（`verify_flash.ld`/`verify_main.c`/`build_verify.sh`/`build_verify.ps1`/`stress_sched.py`/`README.md`）、`LICENSE`、`CONTRIBUTING.md`、`SECURITY.md`、`.gitattributes`、`.github/workflows/ci.yml`、`docs/34-AI-Agent技术指标体系设计文档.md` |
+| 修改 | `ai_kernel/tensor_mem/tensor_mem.c`（`ZHIO_CFG_MEM_TRACE`）、`kernel/kernel.c`、`ai_kernel/npu_dsp/npu_dsp.c`、`agent/message_bus/message_bus.c`、`rtos/host/zhio_rtos_port.c`（模块说明头块）、`README.md`、`RELEASE_NOTES.md`、`DEVELOPMENT_LOG.md` |

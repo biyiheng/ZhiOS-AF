@@ -4,6 +4,19 @@
  * 对应《08-NPU-DSP硬件抽象层设计文档》。
  * 维护设备注册表，并提供"主机仿真后端"（无需 TFLM，用于演示/单元测试）。
  * 真实后端（CMSIS-NN/Ethos-U/eIQ Neutron）通过 iRegisterNPUDevice 注册即可。
+ *
+ * =============================================================================
+ * 模块说明（维护入口）
+ * -----------------------------------------------------------------------------
+ * 职责     ：NPU/DSP 设备注册表 + 默认设备选择 + 主机仿真后端（确定性推理）。
+ * 依赖     ：tensor_mem（张量数据读/写）、npu_dsp.h、zhios_config、zhios_rtos。
+ * 被谁调用 ：model_runtime、inference_scheduler（xRunInference→xNPURunInference）、
+ *             kernel.c（初始化注册）、外部 include/npu_dsp.h。
+ * 内存     ：通过张量句柄零拷贝读写（vTensorGetData/ulTensorGetSize），不自行申请
+ *             热路径内存；对应《33》4.2 内存管理与 4.4 设备驱动维度。
+ * 可替换   ：真实加速器仅需实现 NPUDevice_t 回调并经 iRegisterNPUDevice 注册，
+ *             上层零改动（见 bsp/PORTING.md）。
+ * =============================================================================
  */
 #include <string.h>
 #include <stdint.h>

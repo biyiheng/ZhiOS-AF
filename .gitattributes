@@ -1,0 +1,23 @@
+# 统一文本/行尾处理：LF 换行，避免跨平台行尾问题
+* text=auto eol=lf
+
+# 源文件
+*.c    text eol=lf
+*.h    text eol=lf
+*.s    text eol=lf
+*.py   text eol=lf
+*.sh   text eol=lf
+*.ps1  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+
+# 二进制（不做文本规范化）
+*.bin  binary
+*.elf  binary
+*.o    binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.db   binary

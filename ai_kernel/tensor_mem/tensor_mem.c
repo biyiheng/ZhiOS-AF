@@ -11,7 +11,7 @@
  * -----------------------------------------------------------------------------
  * 职责     ：张量内存分配/回收/统计/碎片整理，杜绝推理热路径的动态堆碎片。
  * 依赖     ：zhios_rtos（zhio_malloc 仅用于初始化期一次性申请池，非热路径）、zhios_config。
- * 被谁调用 ：model_runtime、inference_scheduler、agent/*、外部 include/tensor_mem.h。
+ * 被谁调用 ：model_runtime、inference_scheduler、agent 目录、外部 include/tensor_mem.h。
  * 内存指标 ：对应《33-操作系统技术指标体系设计文档》"内存管理"维度。
  *            满足"静态分区 + 内存池、禁止动态堆碎片、8 字节对齐、Canary 越界检测"；
  *            MPU 栈守护区 / 汇编 Canary 属生产落地项（见 FreeRTOSConfig.h 与《33》4.2）。
@@ -22,6 +22,30 @@
 #include "tensor_mem.h"
 #include "zhios_config.h"
 #include "zhios_rtos.h"
+
+/* =============================================================================
+ * 内存分配周期测量（评审依据）
+ * -----------------------------------------------------------------------------
+ * 目标：xAllocTensor 单次分配 <200 CPU 周期（《33》4.2"内存管理"）。
+ * 开关 ZHIO_CFG_MEM_TRACE（0=关闭，省去读周期计数器开销），Cortex-M 用
+ * DWT->CYCCNT，其余平台回退到 tick 作相对估算。统计最坏分配周期供性能分析。
+ * ============================================================================= */
+#ifndef ZHIO_CFG_MEM_TRACE
+#define ZHIO_CFG_MEM_TRACE 1
+#endif
+
+static uint32_t g_alloc_worst_cycles = 0;   /* 单次张量分配最坏周期数 */
+
+/* 平台周期计数：Cortex-M 用 DWT->CYCCNT，其余回退到 tick（相对估算） */
+static inline uint32_t mem_cycles_now(void)
+{
+#if defined(__CORTEX_M) || defined(ARMV8M_MAINLINE) || defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_6M__)
+    extern volatile uint32_t DWT_CYCCNT;   /* 由 BSP/链接脚本提供 */
+    return DWT_CYCCNT;
+#else
+    return (uint32_t)zhio_get_tick();
+#endif
+}
 
 /* ---- 张量句柄内部结构 ---- */
 typedef struct {
@@ -154,6 +178,10 @@ static TensorObj_t *obj_alloc(void)
 TensorHandle_t xAllocTensor(const TensorDesc_t *desc)
 {
     if (!desc || desc->dims == 0 || desc->dims > 4) return NULL;
+    uint32_t t0 = 0;
+#if ZHIO_CFG_MEM_TRACE
+    t0 = mem_cycles_now();
+#endif
     uint32_t size = desc->size_bytes;
     if (size == 0) size = 1;
     uint32_t aligned = align_up(size, ZHIO_TENSOR_ALIGN);
@@ -187,6 +215,15 @@ TensorHandle_t xAllocTensor(const TensorDesc_t *desc)
 #endif
     g_pool.temp_top = new_top;
     g_pool.alloc_count++;
+#if ZHIO_CFG_MEM_TRACE
+    {
+        uint32_t dt = mem_cycles_now() - t0;
+        if (dt > g_alloc_worst_cycles) {
+            g_alloc_worst_cycles = dt;
+            zhio_log("[tensor_mem] new worst alloc=%u cycles (target <200)", (unsigned)dt);
+        }
+    }
+#endif
     return (TensorHandle_t)obj;
 }
 
