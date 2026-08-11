@@ -5,6 +5,20 @@
  * 此处配置 FreeRTOS 内核本身的裁剪项（队列/互斥量/信号量/软件定时器/堆）。
  * 生产项目通常由 FreeRTOS 内核源码携带一份默认配置，本项目在此提供面向
  * Cortex-M7 的推荐参数。
+ *
+ * =============================================================================
+ * 模块说明（维护入口）
+ * -----------------------------------------------------------------------------
+ * 职责     ：裁剪 FreeRTOS 内核以匹配 STM32H743（Cortex-M7）。
+ * 实时指标 ：对应《33-操作系统技术指标体系设计文档》4.1/4.2：
+ *             - configPRIO_BITS=4、configMAX_SYSCALL_INTERRUPT_PRIORITY 保证
+ *               内核临界区可屏蔽可调度中断，ISR 可安全调用 FromISR API；
+ *             - configCHECK_FOR_STACK_OVERFLOW=2（方法 2）做栈溢出检测，
+ *               生产建议进一步用 MPU 栈守护子区域 + 汇编 Canary（见《33》4.2/4.6）；
+ *             - configASSERT 失败即关中断死循环（便于看门狗复位，见 4.6）。
+ * 待落地    ：configTOTAL_HEAP_SIZE=128KB 为动态堆；硬实时关键任务请改用静态栈
+ *             （configSUPPORT_STATIC_ALLOCATION=1 已启用）。
+ * =============================================================================
  */
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H

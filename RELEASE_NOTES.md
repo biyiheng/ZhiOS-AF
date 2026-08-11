@@ -47,6 +47,11 @@
 - 新增 `tools/run_wsl_deploy.sh`：WSL2 环境一键部署（环境校验 / 可选 clean clone release 分支 / `--keep` 常驻）。
 - 新增 `tools/verify_release.py`：无需 Docker 引擎静态校验 release 分支可部署性（Dockerfile COPY 源 / 构建上下文 / 挂载 / 关键文件）。
 
+### 2.6 嵌入式 OS 技术指标体系 + 架构审核 + 模块化注释
+- 新增《33-操作系统技术指标体系设计文档》：六大维度（内核调度/内存管理/中断与异常/设备驱动/功耗管理/启动流程）+ 硬性门槛 + 当前实现对照 + 差距分析 + 落实路径。
+- 新增汇编级参考模板：`bsp/stm32h743/startup_stm32h743.s`（向量表/复位/故障转储）、`bsp/stm32h743/port_context_switch.s`（PendSV 切换/LDREX-STREX/位带/WFI 低功耗）。
+- 对核心内核/HAL/BSP/RTOS 端口补充统一「模块说明（维护入口）」注释；调度器新增 `ZHIO_CFG_SCHED_TRACE` 调度决策/抖动周期测量。
+
 ---
 
 ## 3. 本版本修复的 Bug

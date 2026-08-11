@@ -499,3 +499,61 @@ cmake --build build
 | 新增 | `tools/run_wsl_deploy.sh`、`tools/verify_release.py` |
 | 修改 | `tools/agent_console/e2e_test.py`（新增压力套件，59→66 断言）、`README.md` |
 | 验证 | `e2e_test.py` 66/66 ALL PASS；`verify_release.py` 71 处引用 ALL PASS；`bash -n` 通过 |
+
+---
+
+## 16. 第九阶段：OS 技术指标体系 + 架构审核 + 模块化注释 + 优化（2026-08-12）
+
+### 16.1 新建 OS 技术指标体系文档
+- 新增 [docs/33-操作系统技术指标体系设计文档.md](docs/../docs/33-操作系统技术指标体系设计文档.md)
+  （编号 ZHIOS-AF-SPEC-033），围绕嵌入式 OS 三大核心约束（确定性时序、资源受限、硬件紧耦合）
+  定义**六大维度 + 硬性门槛 + 验收清单 + 落实路径**：
+  - 内核调度（固定优先级抢占 + EDF、决策 O(1)/O(log n)、上下文切换 <500ns、Jitter≤1%、
+    中断延迟<12 周期、PendSV 汇编切换、100% 负载满足截止期）；
+  - 内存管理（静态分区/内存池、零碎片、8 字节对齐 + MPU 守护、Canary、ROM≤256KB/RAM<64KB）；
+  - 中断与异常（NVIC 压栈、CPSID/CPSIE、LDREX/STREX、DMB/DSB/ISB、位带 STR、故障寄存器镜像转储）；
+  - 设备驱动（零拷贝 DMA 环形缓冲、底半部原子位图/事件标志组、volatile+内存屏障）；
+  - 功耗管理（WFI/WFE、3 周期唤醒、SCR.SLEEPDEEP/SLEEPONEXIT + WFI 前 DSB）；
+  - 启动流程（向量表 0x00000000、复位段搬运、看门狗 20ms、Bootloader 签名、MISRA C/ASIL-D、MTBF≥50,000h）。
+- 每项指标均给出**当前实现对照表**（✅已实现 / 🟡部分或需实测/落地），如实标注差距，不虚标。
+
+### 16.2 架构审核与模块化注释
+- 对核心内核模块补充统一「模块说明（维护入口）」头块，标注职责/依赖/被谁调用/对应指标，便于维护：
+  - [ai_kernel/inference_scheduler/inference_scheduler.c](zhi-os-af/ai_kernel/inference_scheduler/inference_scheduler.c)
+  - [ai_kernel/tensor_mem/tensor_mem.c](zhi-os-af/ai_kernel/tensor_mem/tensor_mem.c)
+  - [hal/hal_host.c](zhi-os-af/hal/hal_host.c)
+  - [bsp/stm32h743/hal_stm32h743.c](zhi-os-af/bsp/stm32h743/hal_stm32h743.c)
+  - [bsp/stm32h743/board.c](zhi-os-af/bsp/stm32h743/board.c)
+  - [bsp/stm32h743/FreeRTOSConfig.h](zhi-os-af/bsp/stm32h743/FreeRTOSConfig.h)
+  - [rtos/freertos/zhio_rtos_port.c](zhi-os-af/rtos/freertos/zhio_rtos_port.c)
+
+### 16.3 代码与算法优化
+- **调度抖动/决策延迟测量**：[inference_scheduler.c](zhi-os-af/ai_kernel/inference_scheduler/inference_scheduler.c)
+  新增 `ZHIO_CFG_SCHED_TRACE` 与 `sched_cycles_now()`（Cortex-M 用 DWT->CYCCNT，其余回退 tick），
+  在 `xInferenceSchedulerGetNext()` 采集单次调度决策周期并记录**最坏决策延迟** `g_sched_worst_cycles`，
+  直接支撑 Jitter≤1% 与决策复杂度指标的量化验证。
+- **复杂度评审**：应用层调度为 O(N)（N=编译期小常数 8~32），OS 级抢占为 FreeRTOS O(1) 就绪位图；
+  在注释中给出 O(1)/O(log n) 达成路径（N 增大时改最小堆），避免过度设计引入堆维护开销。
+
+### 16.4 汇编级参考模板（新增，Cortex-M7）
+- 新增 [bsp/stm32h743/startup_stm32h743.s](zhi-os-af/bsp/stm32h743/startup_stm32h743.s)：
+  向量表置 0x00000000（初始 MSP + 复位指针）、复位后时钟(RCC)/.bss 清零/.data 搬运、故障异常
+  （HardFault/BusFault/MemManage）寄存器镜像转储占位。
+- 新增 [bsp/stm32h743/port_context_switch.s](zhi-os-af/bsp/stm32h743/port_context_switch.s)：
+  PendSV 上下文切换（MRS PSP / STMDB R4-R11 / LDMIA / MSR PSP / BX LR）、CPSID/CPSIE、
+  LDREX/STREX 原子自旋锁、DMB/DSB/ISB 屏障、位带单次 STR 原子 GPIO、WFI/SLEEPDEEP 低功耗原语。
+- 以上为【参考模板】，需在 arm-none-eabi + FreeRTOS 端口环境编译验证，生产按 CubeMX/官方 port 落地。
+
+### 16.5 验证
+| 项 | 结果 |
+| --- | --- |
+| `python tools/sim/zhio_sim.py` | 21 用例 / 49 断言 ALL PASS（无回归） |
+| 新增注释/优化 | 仅注释 + 受 `ZHIO_CFG_SCHED_TRACE` 宏保护的测量逻辑，不改公开 API |
+| 参考模板 | 需真实工具链编译验证（本机无 arm-none-eabi），已在模板头注明 |
+
+### 16.6 本阶段新增/修改文件
+| 类型 | 文件 |
+| --- | --- |
+| 新增文档 | `docs/33-操作系统技术指标体系设计文档.md` |
+| 新增模板 | `bsp/stm32h743/startup_stm32h743.s`、`bsp/stm32h743/port_context_switch.s` |
+| 修改注释/优化 | `ai_kernel/inference_scheduler/inference_scheduler.c`、`ai_kernel/tensor_mem/tensor_mem.c`、`hal/hal_host.c`、`bsp/stm32h743/hal_stm32h743.c`、`bsp/stm32h743/board.c`、`bsp/stm32h743/FreeRTOSConfig.h`、`rtos/freertos/zhio_rtos_port.c` |

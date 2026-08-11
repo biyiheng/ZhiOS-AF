@@ -85,6 +85,14 @@ Dockerfile 的 COPY 源、bind 挂载路径与关键运行文件是否齐全）�
 python tools/verify_release.py          # 期望输出 RELEASE VERIFY ALL PASS
 ```
 
+## 操作系统技术指标体系
+
+嵌入式 OS 六大维度（内核调度 / 内存管理 / 中断与异常 / 设备驱动 / 功耗管理 / 启动流程）的
+指标、硬性门槛、当前实现对照与差距分析见
+《[33-操作系统技术指标体系设计文档](../docs/33-操作系统技术指标体系设计文档.md)》。
+汇编级参考模板（向量表/复位、PendSV 上下文切换、LDREX/STREX、位带、WFI 低功耗）位于
+`bsp/stm32h743/startup_stm32h743.s` 与 `bsp/stm32h743/port_context_switch.s`。
+
 ## 发布说明（Release）
 
 当前版本 **v1.1.0**，归档于 `release` 分支（完整可独立部署快照）。详见
