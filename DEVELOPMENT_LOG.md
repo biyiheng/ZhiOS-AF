@@ -412,3 +412,33 @@ cmake --build build
 | --- | --- |
 | 修改 | `docker-compose.yml`（合并 9 服务 + 移除 version + e2e 依赖）、`tools/run_integration.sh`、`tools/run_integration.ps1`（UTF-8 BOM）、`tools/agent_console/app.py`（排空请求体修复 413 连接中止）、`docs/agent控制软件技术文档.md`（7.3 单文件部署 + 安全表 + 验证结果） |
 | 验证 | `docker compose config` 9 服务解析通过；`e2e_test.py` 54/54 ALL PASS；`Parser::ParseFile` PS1 语法通过 |
+
+---
+
+## 14. 第七阶段：部署手册 + 413 回归测试 + release 分支归档（2026-08-12）
+
+### 14.1 部署操作手册
+- 新增 [docs/部署操作手册.md](docs/../docs/部署操作手册.md)（v1.0.0）：
+  环境准备（WSL2 + Docker Desktop 安装/校验）→ 获取代码 → 环境自检 → 一键启动 → 手动编排 →
+  端到端验证 → 停止清理 → 常见问题排障 → 二次开发接入 → 命令速查。
+
+### 14.2 413 / 连接中止回归测试
+- 在 [tools/agent_console/e2e_test.py](zhi-os-af/tools/agent_console/e2e_test.py) 新增 **回归-413/连接中止** 套件（5 项断言）：
+  ①单个超大载荷返回 413（不中止连接）；②413 响应带 `Connection: close`；
+  ③同连接 413 后后续请求可用；④连续多次 413 稳定返回；⑤413 后服务仍健康。
+- **实测**：`e2e_test.py` 由 54/54 提升至 **59/59 ALL PASS**，防止 Bug #19 未来回归。
+
+### 14.3 release 分支归档 + 版本发布说明
+- 本目录非 git 仓库，已执行 `git init` 并创建 **`release` 分支**，将部署产物归档：
+  `docker-compose.yml`、`tools/run_integration.sh/.ps1`、`docker/`、`tools/agent_console/`、
+  `RELEASE_NOTES.md`、`DEVELOPMENT_LOG.md`、`.gitignore`。
+- 提交：`67ef55b release: v1.1.0 单文件容器编排 + 一键端到端部署`。
+- 新增 [RELEASE_NOTES.md](zhi-os-af/RELEASE_NOTES.md)（v1.1.0）：版本信息、新特性、修复 Bug、验证结果、部署方式、归档清单。
+
+### 14.4 本阶段新增/修改文件
+| 类型 | 文件 |
+| --- | --- |
+| 新增 | `docs/部署操作手册.md`、`RELEASE_NOTES.md`、`.gitignore` |
+| 修改 | `tools/agent_console/e2e_test.py`（新增回归-413 套件） |
+| 归档 | 初始化 git 仓库，创建 `release` 分支并提交 `67ef55b` |
+| 验证 | `e2e_test.py` 59/59 ALL PASS |
