@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZhiOS-AF Agent 控制软件</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background:#0f1420; color:#e6e9f0; }
+  header { background:#161d2e; padding:14px 24px; display:flex; align-items:center; gap:16px; border-bottom:1px solid #2a3350; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:#8a93ab; font-size:12px; }
+  nav { display:flex; gap:4px; padding:10px 24px 0; flex-wrap:wrap; }
+  nav button { background:transparent; color:#aab3c9; border:1px solid transparent; padding:8px 14px;
+    border-radius:8px 8px 0 0; cursor:pointer; font-size:14px; }
+  nav button.active { background:#1c2742; color:#7fb0ff; border-color:#2a3350; border-bottom-color:#1c2742; }
+  main { padding:16px 24px 40px; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .card { background:#1c2742; border:1px solid #2a3350; border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h3 { margin:0 0 12px; font-size:15px; color:#9fc0ff; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #232c45; }
+  th { color:#8a93ab; font-weight:600; }
+  button.action { background:#2f6bff; color:#fff; border:none; padding:7px 14px; border-radius:6px; cursor:pointer; }
+  button.action.small { padding:4px 10px; font-size:12px; }
+  button.danger { background:#b3394a; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  input, select { background:#121a2d; color:#e6e9f0; border:1px solid #2a3350; border-radius:6px; padding:7px 10px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; }
+  .ok { background:#1e5a36; color:#7fe0a8; }
+  .warn { background:#5a4a1e; color:#ffd76f; }
+  .err { background:#5a1e28; color:#ff8f9f; }
+  .mono { font-family: Consolas, monospace; }
+  .bar { background:#121a2d; height:14px; border-radius:7px; overflow:hidden; width:180px; display:inline-block; vertical-align:middle; }
+  .bar > span { display:block; height:100%; background:#2f6bff; }
+  pre.log { background:#0b0f19; border:1px solid #232c45; border-radius:8px; padding:12px; font-size:12px; overflow:auto; max-height:320px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ZhiOS-AF · Agent 控制软件</h1>
+  <span class="sub">系统自带管理控制台 · 前后端 + 数据库 + 功能模块</span>
+</header>
+<nav>
+  <button data-panel="agents" class="active">Agent 管理</button>
+  <button data-panel="training">训练流水线</button>
+  <button data-panel="data">数据分布</button>
+  <button data-panel="monitor">运行监控</button>
+  <button data-panel="security">安全/防火墙</button>
+  <button data-panel="config">配置</button>
+  <button data-panel="audit">审计日志</button>
+</nav>
+<main>
+  <!-- Agent 管理 -->
+  <section class="panel active" id="agents">
+    <div class="card">
+      <h3>新建 Agent</h3>
+      <div class="row">
+        <input id="a_name" placeholder="名称 (vision)">
+        <input id="a_desc" placeholder="描述">
+        <select id="a_type"><option value="sub">子 Agent</option><option value="auto">Auto 主 Agent</option></select>
+        <button class="action" onclick="createAgent()">创建</button>
+      </div>
+    </div>
+    <div class="card"><h3>Agent 列表</h3><div id="agents_tbl"></div></div>
+  </section>
+
+  <!-- 训练 -->
+  <section class="panel" id="training">
+    <div class="card">
+      <h3>触发训练（合法爬虫取数 + 口袋感知机，离线自动回退）</h3>
+      <p id="train_status" style="color:#8a93ab">选择下方 Agent 并点击"训练"。</p>
+      <table><thead><tr><th>Agent</th><th>训练</th><th>最近准确率</th></tr></thead><tbody id="train_tbl"></tbody></table>
+    </div>
+    <div class="card"><h3>训练运行记录</h3><div id="runs_tbl"></div></div>
+  </section>
+
+  <!-- 数据 -->
+  <section class="panel" id="data">
+    <div class="card">
+      <h3>类别分布（类别不平衡检查）</h3>
+      <div id="dist_tbl"></div>
+    </div>
+    <div class="card"><h3>样本预览</h3><pre class="log" id="sample_pre">加载中…</pre></div>
+  </section>
+
+  <!-- 监控 -->
+  <section class="panel" id="monitor">
+    <div class="card"><h3>系统运行状态</h3><div id="monitor_tbl"></div></div>
+  </section>
+
+  <!-- 安全 -->
+  <section class="panel" id="security">
+    <div class="card">
+      <h3>通信防火墙（默认拒绝 + 白名单 + 限速 + 长度上限）</h3>
+      <div class="row">
+        <label>命令白名单（逗号分隔）：<input id="fw_cmds" placeholder="1,2,3,16"></label>
+        <label>源白名单（逗号分隔，留空=不强制）：<input id="fw_srcs" placeholder="7,8"></label>
+        <label>限速 tokens/s：<input id="fw_rate" type="number" value="100"></label>
+        <label>突发 burst：<input id="fw_burst" type="number" value="10"></label>
+        <label>载荷上限 bytes：<input id="fw_len" type="number" value="1024"></label>
+      </div>
+      <p><button class="action" onclick="updateFw()">保存规则</button></p>
+      <div id="fw_stats" class="card" style="background:#161d2e"></div>
+    </div>
+  </section>
+
+  <!-- 配置 -->
+  <section class="panel" id="config">
+    <div class="card"><h3>系统配置</h3><div id="config_tbl"></div></div>
+  </section>
+
+  <!-- 审计 -->
+  <section class="panel" id="audit">
+    <div class="card"><h3>审计日志</h3><pre class="log" id="audit_pre">加载中…</pre></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = async (path, opts={}) => {
+  const r = await fetch(path, {
+    headers: {'Content-Type':'application/json'},
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  return r.json();
+};
+
+// ---- 导航 ----
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  $(b.dataset.panel).classList.add('active');
+  refresh();
+});
+
+// ---- Agents ----
+async function loadAgents(){
+  const d = await api('/api/agents');
+  const rows = d.agents.map(a => `
+    <tr>
+      <td>${a.name}</td><td>${a.type}</td><td>${a.description||''}</td>
+      <td><span class="badge ${a.enabled?'ok':'warn'}">${a.enabled?'启用':'停用'}</span></td>
+      <td>${a.accuracy!=null? a.accuracy.toFixed(3):'—'}</td>
+      <td><button class="action small" onclick="toggleAgent(${a.id},${a.enabled?0:1})">${a.enabled?'停用':'启用'}</button>
+          <button class="action small danger" onclick="delAgent(${a.id})">删除</button></td>
+    </tr>`).join('');
+  $('agents_tbl').innerHTML = `<table><thead><tr><th>名称</th><th>类型</th><th>描述</th><th>状态</th><th>准确率</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('train_tbl').innerHTML = d.agents.map(a => `
+    <tr><td>${a.name}</td>
+      <td><button class="action small" onclick="trainAgent(${a.id},'${a.name}')">训练</button></td>
+      <td>${a.accuracy!=null? a.accuracy.toFixed(3):'—'}</td></tr>`).join('');
+}
+async function createAgent(){
+  await api('/api/agents',{method:'POST',body:{name:$('a_name').value, description:$('a_desc').value, type:$('a_type').value}});
+  loadAgents();
+}
+async function toggleAgent(id,v){ await api('/api/agents/'+id,{method:'PUT',body:{enabled:v}}); loadAgents(); }
+async function delAgent(id){ await api('/api/agents/'+id,{method:'DELETE'}); loadAgents(); }
+async function trainAgent(id,name){
+  $('train_status').textContent = `训练 ${name} 中…（合法爬虫取数，离线自动回退）`;
+  const r = await api('/api/agents/'+id+'/train',{method:'POST'});
+  $('train_status').textContent = `${name} 训练完成：测试准确率=${r.test_acc}，训练准确率=${r.train_acc}，数据来源=${r.source}，类别不平衡比=${r.imbalance_ratio}`;
+  loadAgents(); loadRuns();
+}
+
+// ---- Runs ----
+async function loadRuns(){
+  const d = await api('/api/training/runs');
+  const rows = d.runs.map(r => `<tr><td>${r.id}</td><td>${r.agent_name}</td>
+    <td>${r.test_acc!=null? r.test_acc.toFixed(3):'—'}</td>
+    <td>${r.imbalance_ratio!=null? r.imbalance_ratio.toFixed(2):'—'}</td>
+    <td class="mono" style="font-size:11px">${r.source||''}</td>
+    <td>${r.started_at}</td></tr>`).join('');
+  $('runs_tbl').innerHTML = `<table><thead><tr><th>ID</th><th>Agent</th><th>测试准确率</th><th>不平衡比</th><th>数据来源</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ---- Data distribution ----
+async function loadDist(){
+  const d = await api('/api/dataset');
+  const counts = {};
+  d.samples.forEach(s => { const k=s.agent_name+':'+s.split; counts[k]=(counts[k]||0)+1; });
+  const per = {};
+  d.samples.forEach(s => {
+    if(!per[s.agent_name]) per[s.agent_name]={train:[0,0],test:[0,0]};
+    const idx = s.split==='train'?0:1;
+    per[s.agent_name][idx][s.y] += 1;
+  });
+  let html = '<table><thead><tr><th>Agent</th><th>训练集</th><th>正类</th><th>负类</th><th>正类占比</th><th>不平衡比</th></tr></thead><tbody>';
+  Object.keys(per).forEach(a => {
+    const [pos,neg]=per[a][0]; const total=pos+neg;
+    const ratio = total? (Math.max(pos,neg)/Math.max(1,Math.min(pos,neg))) : Infinity;
+    const pct = total? (pos/total*100).toFixed(1)+'%' : '—';
+    html += `<tr><td>${a}</td><td>${total}</td><td>${pos}</td><td>${neg}</td><td>${pct}</td><td>${ratio===Infinity?'∞':ratio.toFixed(2)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  $('dist_tbl').innerHTML = html;
+  $('sample_pre').textContent = JSON.stringify(d.samples.slice(0,12), null, 2);
+}
+
+// ---- Monitor ----
+async function loadMonitor(){
+  const d = await api('/api/monitor');
+  $('monitor_tbl').innerHTML = `
+    <table><tbody>
+      <tr><td>运行时长(秒)</td><td>${d.uptime_s}</td></tr>
+      <tr><td>Agent 总数</td><td>${d.agents_total}</td></tr>
+      <tr><td>启用 Agent</td><td>${d.agents_enabled}</td></tr>
+      <tr><td>防火墙放行/拦截/丢弃</td><td>${d.fw.allowed} / ${d.fw.blocked} / ${d.fw.dropped}</td></tr>
+      <tr><td>最近训练</td><td>${d.last_run? d.last_run.agent_name+' @ '+d.last_run.finished_at:'—'}</td></tr>
+    </tbody></table>`;
+}
+
+// ---- Firewall ----
+async function loadFw(){
+  const d = await api('/api/security/firewall');
+  const f = d.firewall;
+  $('fw_cmds').value = f.cmds.join(',');
+  $('fw_srcs').value = f.srcs.join(',');
+  $('fw_rate').value = f.rate;
+  $('fw_burst').value = f.burst;
+  $('fw_len').value = f.max_payload;
+  $('fw_stats').innerHTML = `放行 <b>${f.allowed}</b> · 拦截 <b>${f.blocked}</b> · 限速丢弃 <b>${f.dropped}</b>`;
+}
+async function updateFw(){
+  const cmds = $('fw_cmds').value.split(',').map(x=>parseInt(x.trim())).filter(x=>!isNaN(x));
+  const srcs = $('fw_srcs').value.split(',').map(x=>parseInt(x.trim())).filter(x=>!isNaN(x));
+  await api('/api/security/firewall',{method:'PUT',body:{
+    cmds, srcs, has_src_rule: srcs.length>0,
+    rate:+$('fw_rate').value, burst:+$('fw_burst').value, max_payload:+$('fw_len').value
+  }});
+  loadFw(); loadMonitor();
+}
+
+// ---- Config ----
+async function loadConfig(){
+  const d = await api('/api/config');
+  $('config_tbl').innerHTML = Object.entries(d.config).map(([k,v]) => `
+    <div class="row" style="margin-bottom:8px">
+      <input value="${k}" disabled style="width:180px">
+      <input value="${v}" id="cfg_${k}" style="width:140px">
+      <button class="action small" onclick="saveConfig('${k}')">保存</button>
+    </div>`).join('');
+}
+async function saveConfig(k){
+  await api('/api/config',{method:'PUT',body:{config:{[k]:$('cfg_'+k).value}}});
+  loadConfig();
+}
+
+// ---- Audit ----
+async function loadAudit(){
+  const d = await api('/api/audit');
+  $('audit_pre').textContent = d.logs.map(l => `[${l.ts}] ${l.actor} · ${l.action} · ${l.detail}`).join('\n');
+}
+
+function refresh(){ loadAgents(); loadRuns(); loadDist(); loadMonitor(); loadFw(); loadConfig(); loadAudit(); }
+refresh();
+setInterval(loadMonitor, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+# ZhiOS-AF 容器编排（单文件合并版）
+#
+# 一键启动所有模块：单元测试 / 演示 / 云端网关 / 监控 / 训练测试 /
+# Agent 控制软件 / 通信防火墙 / UART 驱动 / 端到端综合验证。
+#
+# 服务清单：
+#   - tests / demo      : 主机单元测试与演示（一次性）
+#   - gateway           : 云端 AI 服务网关（OpenAI/Claude/A2A/MCP + WebSocket）
+#   - monitor           : ZMonitor 运行监控
+#   - sim-training      : 训练链路自动化测试（爬虫取数 + 训练）
+#   - agent-console     : Agent 控制软件（前端 + 后端 + SQLite，常驻端口 8000）
+#   - firewall          : 通信防火墙独立验证（默认拒绝/白名单/限速）
+#   - driver            : UART 环形缓冲驱动独立验证
+#   - e2e               : 端到端综合验证（控制软件 + 防火墙 + 驱动）
+#
+# 一键命令（在 zhi-os-af/ 仓库根目录执行）：
+#   docker compose up -d agent-console            # 常驻控制软件
+#   docker compose run --rm e2e                   # 综合端到端验证
+# 或全部构建：
+#   docker compose build
+#
+# 对应《15-Docker容器化构建与部署文档》《agent控制软件技术文档.md》。
+
+services:
+  # ---- 单元测试与演示（一次性） ----
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    command: ["/app/zhio_tests"]
+
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    command: ["/app/zhio_demo"]
+
+  # ---- 云端网关与监控 ----
+  gateway:
+    build:
+      context: ./docker/gateway
+    ports:
+      - "8080:8080"
+    environment:
+      GATEWAY_PORT: "8080"
+      # 生产环境通过环境变量注入密钥引用，避免明文
+      OPENAI_API_KEY_REF: ""
+      CLAUDE_API_KEY_REF: ""
+    restart: unless-stopped
+
+  monitor:
+    build:
+      context: ./docker/gateway
+    command: ["python", "-m", "http.server", "9000", "--directory", "/monitor"]
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./tools/zmonitor:/monitor
+    restart: unless-stopped
+
+  # ---- 训练链路自动化测试（爬虫取数 + Agent 训练） ----
+  sim-training:
+    build:
+      context: .
+      dockerfile: docker/sim/Dockerfile
+    image: zhi-af/sim-training:latest
+    environment:
+      N_TRAIN: "400"
+      N_TEST: "200"
+    restart: "no"
+
+  # ---- Agent 控制软件（前端 + 后端 + SQLite 数据库，常驻） ----
+  agent-console:
+    build:
+      context: .
+      dockerfile: docker/agent_console/Dockerfile
+    image: zhi-af/agent-console:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - agent_data:/data
+    restart: unless-stopped
+
+  # ---- 通信防火墙独立验证（默认拒绝 + 白名单 + 源白名单 + 长度上限 + 令牌桶限速） ----
+  firewall:
+    build:
+      context: .
+      dockerfile: docker/security/Dockerfile
+    image: zhi-af/firewall:latest
+    restart: "no"
+
+  # ---- UART 环形缓冲驱动独立验证（FIFO/满丢弃/空读/回绕） ----
+  driver:
+    build:
+      context: .
+      dockerfile: docker/driver/Dockerfile
+    image: zhi-af/uart-driver:latest
+    restart: "no"
+
+  # ---- 端到端综合验证（控制软件 + 防火墙 + 驱动） ----
+  e2e:
+    build:
+      context: .
+      dockerfile: docker/e2e/Dockerfile
+    image: zhi-af/e2e:latest
+    restart: "no"
+    depends_on:
+      - agent-console
+
+volumes:
+  agent_data:
