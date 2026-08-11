@@ -31,8 +31,8 @@
 - 新增《部署操作手册.md》，覆盖环境准备（WSL2 + Docker Desktop）→ 获取代码 → 一键启动 → 验证 → 排障。
 
 ### 2.3 端到端自动化测试
-- 新增 `tools/agent_console/e2e_test.py`（10+1 套件，**59 项断言**）：
-  前端 / 数据库 / Agent 管理 / 训练 / 数据分布 / 监控 / 防火墙 / 配置 / 审计 / 安全加固 / 413 连接中止回归。
+- 新增 `tools/agent_console/e2e_test.py`（12 套件，**66 项断言**）：
+  前端 / 数据库 / Agent 管理 / 训练 / 数据分布 / 监控 / 防火墙 / 配置 / 审计 / 安全加固 / 413 连接中止回归 / **413 压力测试**。
 - 新增 `docker/e2e/` 多阶段镜像：单容器内依次验证控制软件端到端 + C 层防火墙 + UART 驱动。
 
 ### 2.4 安全加固
@@ -41,6 +41,11 @@
 - 非法 JSON 返回 400（不触发 500）。
 - **修复超大载荷连接中止**（Bug #19）：返回 413 前先排空请求体并带 `Connection: close`，避免 TCP 连接被中止。
 - 增加 **413/连接中止回归测试套件**，防止未来回归。
+
+### 2.5 压力测试 + WSL2 一键部署 + 可部署性自检
+- 新增 **413/连接中止压力测试套件**（`test_stress_413`）：高频 30 次、并发 8 路、边界体长（略超 64KB->413、体长合法名称超长->400）、混合负载、同连接交替、压力后健康，共 7 项断言。
+- 新增 `tools/run_wsl_deploy.sh`：WSL2 环境一键部署（环境校验 / 可选 clean clone release 分支 / `--keep` 常驻）。
+- 新增 `tools/verify_release.py`：无需 Docker 引擎静态校验 release 分支可部署性（Dockerfile COPY 源 / 构建上下文 / 挂载 / 关键文件）。
 
 ---
 
@@ -62,13 +67,14 @@
 | 项 | 结果 |
 | --- | --- |
 | `docker compose config` | 9 个服务解析通过 |
-| `tools/agent_console/e2e_test.py` | **59/59 断言通过（ALL PASS）** |
-| 部署脚本语法 | `run_integration.sh` 与 `run_integration.ps1`（UTF-8 BOM）校验通过 |
+| `tools/agent_console/e2e_test.py` | **66/66 断言通过（ALL PASS，含回归 + 压力套件）** |
+| `tools/verify_release.py` | **71 处引用无缺失，RELEASE VERIFY ALL PASS** |
+| 部署脚本语法 | `run_integration.sh` / `run_integration.ps1` / `run_wsl_deploy.sh` 校验通过 |
 | 数据库迁移 `migrate.py` | 新建 / 升级 / 幂等均 OK |
 | 训练链路 | 5 个 Agent 测试准确率 0.90+（真实爬虫数据） |
 
-> 说明：本机（Windows）未运行 Docker 引擎（WSL2 后端缺失），真实容器部署需在具备 Docker 的环境执行；
-> 端到端流程已通过本地等价 `e2e_test.py` 验证。
+> 说明：本机（Windows）未运行 Docker 引擎（WSL2 后端缺失），真实容器部署需在具备 Docker 的 WSL2/Linux 环境
+> 通过 `tools/run_wsl_deploy.sh` 或 `tools/run_integration.sh` 执行；端到端 + 压力流程已通过本地等价 `e2e_test.py` 验证。
 
 ---
 

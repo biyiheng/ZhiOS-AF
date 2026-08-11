@@ -460,3 +460,42 @@ cmake --build build
 | `67ef55b` | release: v1.1.0 单文件容器编排 + 一键端到端部署 |
 | `8331026` | docs: 记录第七阶段（部署手册/413回归测试/release归档） |
 | `1313a94` | release: 补齐完整源码，使 release 分支可独立部署 |
+
+---
+
+## 15. 第八阶段：413 压力测试 + WSL2 一键部署 + 可部署性校验 + README 更新（2026-08-12）
+
+### 15.1 413 / 连接中止压力测试
+- 在 [tools/agent_console/e2e_test.py](zhi-os-af/tools/agent_console/e2e_test.py) 新增 **压力-413/连接中止** 套件（`test_stress_413`，7 项断言），覆盖：
+  ①高频连续 30 次超大载荷全部 413；②并发 8 路超大载荷全部 413（多线程）；
+  ③边界体长：略超 64KB -> 413，体长合法但名称超长 -> 400（不误杀合法体长）；
+  ④混合负载 20 轮（413 + 正常请求）互不影响；⑤同连接 5 轮交替持续可用；⑥压力后服务仍健康。
+- **实测**：`e2e_test.py` 由 59/59 提升至 **66/66 ALL PASS**，与既有回归套件共同防止 Bug #19 未来回归。
+
+### 15.2 WSL2 环境一键部署脚本
+- 新增 [tools/run_wsl_deploy.sh](zhi-os-af/tools/run_wsl_deploy.sh)：
+  - 环境校验：docker 可用、`OSType=linux`、WSL2 内核（`uname -r` 含 microsoft 标记且版本 >=5.10）、compose 插件；
+  - `--fresh-clone [URL]`：干净拉取 **release 分支**到临时目录部署，用于验证分支可独立部署；
+  - `--keep`：部署后保持 agent-console 常驻；
+  - 流程：构建 → 启动控制软件（等待 `/api/monitor` 就绪）→ 防火墙 → 驱动 → e2e（含压力）→ 主机侧进程内复核 → 清理。
+- 已通过 `bash -n` 语法校验。
+
+### 15.3 release 分支可部署性静态校验
+- 新增 [tools/verify_release.py](zhi-os-af/tools/verify_release.py)：无需 Docker 引擎即可静态校验
+  - 解析 `docker-compose.yml` 各服务 `build.context` + `dockerfile`；
+  - 解析每个 Dockerfile 的 `COPY` 源路径，确认在构建上下文内存在；
+  - 校验 bind 挂载源与关键运行文件齐全；校验当前 git 分支为 `release`。
+- **实测**（当前分支 `release`）：解析 9 个服务，检查 **71 处引用，无缺失文件，RELEASE VERIFY ALL PASS**。
+
+### 15.4 README 更新
+- [README.md](zhi-os-af/README.md) 新增：
+  - 「一键部署（Docker / WSL2）」：WSL2 脚本 / 通用集成脚本 / 手动编排三种方式，及部署前置要求；
+  - 「可部署性自检」：`python tools/verify_release.py`；
+  - 「发布说明（Release）」：当前版本 v1.1.0、release 分支、重点特性。
+
+### 15.5 本阶段新增/修改文件
+| 类型 | 文件 |
+| --- | --- |
+| 新增 | `tools/run_wsl_deploy.sh`、`tools/verify_release.py` |
+| 修改 | `tools/agent_console/e2e_test.py`（新增压力套件，59→66 断言）、`README.md` |
+| 验证 | `e2e_test.py` 66/66 ALL PASS；`verify_release.py` 71 处引用 ALL PASS；`bash -n` 通过 |

@@ -50,6 +50,50 @@ docker compose run --rm demo
 docker compose up -d gateway monitor
 ```
 
+## 一键部署（Docker / WSL2）
+
+采用**单文件 `docker-compose.yml`**（9 个服务）编排全部模块。支持三种方式一键部署
+Agent 控制软件 + 通信防火墙 + UART 驱动 + 端到端综合验证：
+
+```bash
+# 方式 A：WSL2 环境一键部署（推荐，含环境校验与可选 clean clone）
+bash tools/run_wsl_deploy.sh                        # 用当前目录部署
+bash tools/run_wsl_deploy.sh --fresh-clone <URL>    # 干净拉取 release 分支后部署
+bash tools/run_wsl_deploy.sh --keep                 # 部署后保持控制软件常驻
+
+# 方式 B：通用一键集成（Linux/macOS / Windows PowerShell）
+bash tools/run_integration.sh                                   # Linux/macOS
+powershell -ExecutionPolicy Bypass -File tools/run_integration.ps1   # Windows
+
+# 方式 C：手动编排
+docker compose up -d agent-console      # 常驻 Agent 控制软件，端口 8000
+docker compose run --rm firewall        # 防火墙逻辑验证（一次性）
+docker compose run --rm driver          # 驱动接口验证（一次性）
+docker compose run --rm e2e             # 端到端 + 压力综合验证（一次性）
+```
+
+> 部署前置要求：Docker 引擎可用（Linux 建议 Docker Desktop + WSL2，或 WSL2 内原生 Docker）。
+> 一键脚本会自动校验 Docker/OSType/WSL2 内核（>=5.10）。完整环境准备、排障与二次开发接入
+> 见《[部署操作手册](../docs/部署操作手册.md)》。
+
+### 可部署性自检
+
+无需 Docker 引擎即可静态校验 release 分支是否"完整可独立部署"（检查每个服务构建上下文、
+Dockerfile 的 COPY 源、bind 挂载路径与关键运行文件是否齐全）：
+
+```bash
+python tools/verify_release.py          # 期望输出 RELEASE VERIFY ALL PASS
+```
+
+## 发布说明（Release）
+
+当前版本 **v1.1.0**，归档于 `release` 分支（完整可独立部署快照）。详见
+[RELEASE_NOTES.md](RELEASE_NOTES.md) 与 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md)。
+
+| 版本 | 分支 | 重点 |
+| --- | --- | --- |
+| v1.1.0 | `release` | 单文件容器编排 + 一键部署（WSL2/Windows/Linux）+ 安全加固（413/名称/JSON）+ 回归与压力测试（66 项断言）+ 完整源码归档 |
+
 ## 本地主机构建（Linux/macOS）
 
 ```bash

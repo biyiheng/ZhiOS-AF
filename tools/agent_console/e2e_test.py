@@ -322,6 +322,140 @@ def test_regression_413(c, r):
             f"code={code}")
 
 
+def test_stress_413(c, r):
+    """压力测试：413 + 连接中止修复在高频 / 并发 / 混合 / 边界负载下的稳定性。
+
+    覆盖场景：
+      1) 高频连续 30 次超大载荷，全部稳定返回 413（无中止/异常）
+      2) 并发 8 路超大载荷同时请求，全部稳定返回 413
+      3) 边界体长：略超 64KB -> 413；体长合法但名称超长 -> 400（不误杀合法体长）
+      4) 混合负载：超大载荷(413) 与 正常请求(200/201) 交错，互不影响
+      5) 同连接多轮交替：413 与正常请求在同一 TCP 连接上交替可用
+      6) 压力后服务仍健康（正常业务不受影响）
+    """
+    BIG_NAME = 100 * 1024                      # 约 100KB，远超 64KB
+    OVER_BODY = 70 * 1024                      # 约 70KB，略超 64KB -> 413
+    UNDER_BODY = 60 * 1024                     # 约 60KB，体长合法但名称超长 -> 400
+
+    def payload(n):
+        return json.dumps({"name": "x" * n}).encode("utf-8")
+
+    big = payload(BIG_NAME)
+    hdr = {"Content-Type": "application/json",
+           "Content-Length": str(len(big))}
+
+    # 1) 高频连续 30 次超大载荷，全部 413
+    ok = 0
+    for _ in range(30):
+        conn = _persistent_conn(c.base)
+        try:
+            conn.request("POST", "/api/agents", body=big, headers=hdr)
+            resp = conn.getresponse()
+            resp.read()
+            if resp.status == 413:
+                ok += 1
+        except Exception:   # noqa
+            pass
+        finally:
+            conn.close()
+    require(r, "高频 30 次连续超大载荷全部返回 413", ok == 30, f"ok={ok}/30")
+
+    # 2) 并发 8 路超大载荷，全部 413 且无异常
+    results = []
+    lock = threading.Lock()
+
+    def worker():
+        conn = _persistent_conn(c.base)
+        st = -1
+        try:
+            conn.request("POST", "/api/agents", body=big, headers=hdr)
+            resp = conn.getresponse()
+            resp.read()
+            st = resp.status
+        except Exception:   # noqa
+            st = -1
+        finally:
+            conn.close()
+            with lock:
+                results.append(st)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    require(r, "并发 8 路超大载荷全部稳定返回 413",
+            len(results) == 8 and all(s == 413 for s in results),
+            f"results={results}")
+
+    # 3) 边界体长：略超 -> 413；体长合法但名称超长 -> 400（不误杀合法体长）
+    o = _persistent_conn(c.base)
+    try:
+        ob = payload(OVER_BODY)
+        o.request("POST", "/api/agents", body=ob,
+                  headers={"Content-Type": "application/json",
+                           "Content-Length": str(len(ob))})
+        ors = o.getresponse(); ors.read()
+        require(r, "略超 64KB 体长返回 413", ors.status == 413, f"code={ors.status}")
+    except Exception as e:   # noqa
+        require(r, "略超 64KB 体长返回 413", False, repr(e))
+    finally:
+        o.close()
+    conn = _persistent_conn(c.base)
+    try:
+        ub = payload(UNDER_BODY)
+        conn.request("POST", "/api/agents", body=ub,
+                     headers={"Content-Type": "application/json",
+                              "Content-Length": str(len(ub))})
+        urs = conn.getresponse(); urs.read()
+        require(r, "体长合法但名称超长返回 400（不误杀合法体长）",
+                urs.status == 400, f"code={urs.status}")
+    except Exception as e:   # noqa
+        require(r, "体长合法但名称超长返回 400（不误杀合法体长）", False, repr(e))
+    finally:
+        conn.close()
+
+    # 4) 混合负载：超大载荷(413) 与 正常请求(200) 交错 20 轮，均稳定
+    mixed_ok = True
+    for i in range(20):
+        conn = _persistent_conn(c.base)
+        try:
+            conn.request("POST", "/api/agents", body=big, headers=hdr)
+            r1 = conn.getresponse(); r1.read()
+            conn.request("GET", "/api/monitor")
+            r2 = conn.getresponse(); r2.read()
+            if r1.status != 413 or r2.status != 200:
+                mixed_ok = False
+        except Exception:   # noqa
+            mixed_ok = False
+        finally:
+            conn.close()
+    require(r, "混合负载 20 轮（413+正常请求）互不影响", mixed_ok)
+
+    # 5) 同一连接多轮交替：413 与正常请求在同一 TCP 连接上反复可用
+    conn = _persistent_conn(c.base)
+    alt_ok = True
+    try:
+        for _ in range(5):
+            conn.request("POST", "/api/agents", body=big, headers=hdr)
+            r1 = conn.getresponse(); r1.read()
+            conn.request("GET", "/api/monitor")
+            r2 = conn.getresponse(); r2.read()
+            if r1.status != 413 or r2.status != 200:
+                alt_ok = False
+                break
+    except Exception:   # noqa
+        alt_ok = False
+    finally:
+        conn.close()
+    require(r, "同连接 5 轮交替（413+正常请求）持续可用", alt_ok)
+
+    # 6) 压力后服务仍健康
+    code, d = c.get("/api/monitor")
+    require(r, "压力测试后服务仍健康", code == 200 and d.get("agents_total", 0) >= 5,
+            f"code={code}")
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default=None,
@@ -366,6 +500,7 @@ def main(argv):
         ("审计日志", test_audit),
         ("安全加固", test_security_hardening),
         ("回归-413/连接中止", test_regression_413),
+        ("压力-413/连接中止", test_stress_413),
     ]
 
     for name, fn in suites:
