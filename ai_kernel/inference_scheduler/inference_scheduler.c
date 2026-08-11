@@ -1,0 +1,255 @@
+/*
+ * inference_scheduler.c - 推理任务调度器 + 内核推理执行 API
+ *
+ * 对应《05-实时内核与调度设计文档》《17-API接口规范文档》第 4 节。
+ * EDF（最早截止期）+ 固定优先级抢占混合调度；InferenceTaskTCB_t 为扩展 TCB。
+ */
+#include <string.h>
+#include <stdint.h>
+#include "inference_scheduler.h"
+#include "model_runtime.h"
+#include "security.h"
+#include "tensor_mem.h"
+#include "zhios_config.h"
+#include "zhios_rtos.h"
+
+static InferenceTaskTCB_t g_tasks[ZHIO_CFG_MAX_INFERENCE_TASKS];
+static uint32_t g_sched_inited = 0;
+
+int iInferenceSchedulerInit(void)
+{
+    memset(g_tasks, 0, sizeof(g_tasks));
+    g_sched_inited = 1;
+    return ZHIO_OK;
+}
+void vInferenceSchedulerDeinit(void) { memset(g_tasks, 0, sizeof(g_tasks)); g_sched_inited = 0; }
+
+int xCreateInferenceTask(const char *name, uint32_t priority,
+                         ZhiosTick_t deadline_ticks, ZhiosTick_t period_ticks,
+                         AgentHandle_t owner)
+{
+    if (!g_sched_inited || !name) return ZHIO_E_INVAL;
+    uint32_t i;
+    for (i = 0; i < ZHIO_CFG_MAX_INFERENCE_TASKS; i++) {
+        /* 空闲槽：name 为空 */
+        if (g_tasks[i].name[0] == '\0') {
+            memset(&g_tasks[i], 0, sizeof(g_tasks[i]));
+            strncpy(g_tasks[i].name, name, sizeof(g_tasks[i].name) - 1);
+            g_tasks[i].base_priority   = priority;
+            g_tasks[i].boost_priority  = priority;
+            g_tasks[i].deadline_ticks  = deadline_ticks;
+            g_tasks[i].period_ticks    = period_ticks;
+            g_tasks[i].owner_agent     = owner;
+            g_tasks[i].state           = ZHIO_ITASK_CREATED;
+            zhio_log("[sched] task created: id=%u name=%s prio=%u deadline=%u",
+                     (unsigned)i, name, (unsigned)priority, (unsigned)deadline_ticks);
+            return (int)i;
+        }
+    }
+    zhio_log("[sched] xCreateInferenceTask FAILED: no free slot (%u)", ZHIO_CFG_MAX_INFERENCE_TASKS);
+    return ZHIO_E_NOMEM;
+}
+
+int xDeleteInferenceTask(int task_id)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    if (g_tasks[task_id].state == ZHIO_ITASK_RUNNING) return ZHIO_E_BUSY;
+    zhio_log("[sched] task deleted: id=%d", task_id);
+    memset(&g_tasks[task_id], 0, sizeof(g_tasks[task_id]));
+    return ZHIO_OK;
+}
+
+int xInferenceTaskActivate(int task_id)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    if (g_tasks[task_id].name[0] == '\0') return ZHIO_E_NOTFOUND;
+    if (g_tasks[task_id].state == ZHIO_ITASK_CREATED || g_tasks[task_id].state == ZHIO_ITASK_COMPLETED)
+        g_tasks[task_id].state = ZHIO_ITASK_READY;
+    zhio_log("[sched] task activated: id=%d -> READY", task_id);
+    return ZHIO_OK;
+}
+
+int xInferenceTaskComplete(int task_id)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    g_tasks[task_id].state = ZHIO_ITASK_COMPLETED;
+    return ZHIO_OK;
+}
+
+/* EDF + 优先级抢占混合选择：优先级高者优先，同级取最早截止期 */
+int xInferenceSchedulerGetNext(int *next_id)
+{
+    if (!next_id || !g_sched_inited) return ZHIO_E_INVAL;
+    int best = -1;
+    uint32_t best_prio = 0;
+    ZhiosTick_t best_deadline = 0xFFFFFFFFu;
+    uint32_t i;
+    for (i = 0; i < ZHIO_CFG_MAX_INFERENCE_TASKS; i++) {
+        InferenceTaskTCB_t *t = &g_tasks[i];
+        if (t->name[0] == '\0' || t->state != ZHIO_ITASK_READY) continue;
+        uint32_t prio = (t->boost_priority > t->base_priority) ? t->boost_priority : t->base_priority;
+        if (prio > best_prio) {
+            best = (int)i; best_prio = prio; best_deadline = t->deadline_ticks;
+        } else if (prio == best_prio) {
+            /* EDF 决胜 */
+            if (t->deadline_ticks < best_deadline) {
+                best = (int)i; best_deadline = t->deadline_ticks;
+            }
+        }
+    }
+    *next_id = best;
+    if (best >= 0) {
+        zhio_log("[sched] next task selected: id=%d prio=%u deadline=%u",
+                 best, (unsigned)best_prio, (unsigned)best_deadline);
+        return ZHIO_OK;
+    }
+    return ZHIO_E_NOTFOUND;
+}
+
+int xInferenceTaskSetDeadline(int task_id, ZhiosTick_t d)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    g_tasks[task_id].deadline_ticks = d;
+    return ZHIO_OK;
+}
+int xInferenceTaskSetBoost(int task_id, uint32_t boost)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    g_tasks[task_id].boost_priority = boost;
+    return ZHIO_OK;
+}
+int xInferenceTaskGetTCB(int task_id, InferenceTaskTCB_t *out)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS || !out) return ZHIO_E_INVAL;
+    *out = g_tasks[task_id];
+    return ZHIO_OK;
+}
+int xInferenceSchedulerStats(int task_id, uint32_t *ran, uint32_t *miss)
+{
+    if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
+    if (ran) *ran = g_tasks[task_id].ran_count;
+    if (miss) *miss = g_tasks[task_id].deadline_miss_count;
+    return ZHIO_OK;
+}
+
+/* ================= 取消机制（简化：取消标志列表） ================= */
+#define ZHIO_MAX_CANCEL 8
+static struct { ModelHandle_t model; uint32_t valid; } g_cancel[ZHIO_MAX_CANCEL];
+
+static int is_cancelled(ModelHandle_t m)
+{
+    uint32_t i;
+    for (i = 0; i < ZHIO_MAX_CANCEL; i++)
+        if (g_cancel[i].valid && g_cancel[i].model == m) return 1;
+    return 0;
+}
+static void cancel_mark(ModelHandle_t m)
+{
+    uint32_t i;
+    for (i = 0; i < ZHIO_MAX_CANCEL; i++)
+        if (!g_cancel[i].valid) { g_cancel[i].valid = 1; g_cancel[i].model = m; return; }
+}
+static void cancel_clear(ModelHandle_t m)
+{
+    uint32_t i;
+    for (i = 0; i < ZHIO_MAX_CANCEL; i++)
+        if (g_cancel[i].valid && g_cancel[i].model == m) g_cancel[i].valid = 0;
+}
+
+int xCancelInference(ModelHandle_t model)
+{
+    if (!model) return ZHIO_E_INVAL;
+    cancel_mark(model);
+    zhio_log("[sched] inference cancel requested for model=%p", (void *)model);
+    return ZHIO_OK;
+}
+
+/* ---------------- 同步推理 ---------------- */
+int xRunInference(ModelHandle_t model, TensorHandle_t input, TensorHandle_t output, ZhiosTick_t timeout)
+{
+    if (!model || !input || !output) return ZHIO_E_INVAL;
+    if (is_cancelled(model)) { cancel_clear(model); return ZHIO_E_CANCELED; }
+
+    /* 安全校验 */
+    int rc = zhio_safety_check(model, input, output);
+    if (rc != ZHIO_OK) {
+        zhio_log("[sched] xRunInference BLOCKED by safety validator (rc=%d)", rc);
+        return rc;   /* ZHIO_E_SAFETY */
+    }
+
+    ZhiosTick_t start = zhio_get_tick();
+    rc = xModelExecute(model, input, output);
+    ZhiosTick_t elapsed = zhio_get_tick() - start;
+
+    if (rc != ZHIO_OK) {
+        zhio_log("[sched] xRunInference exec FAILED (rc=%d, elapsed=%u)", rc, (unsigned)elapsed);
+        return rc;
+    }
+    if (timeout != ZHIO_MAX_DELAY && elapsed > timeout) {
+        zhio_log("[sched] xRunInference TIMEOUT: elapsed=%u > timeout=%u",
+                 (unsigned)elapsed, (unsigned)timeout);
+        return ZHIO_E_TIMEOUT;
+    }
+    return ZHIO_OK;
+}
+
+/* ---------------- 异步推理 ---------------- */
+typedef struct {
+    ModelHandle_t     model;
+    TensorHandle_t    input, output;
+    InferenceCallback_t cb;
+    ZhiosTick_t       timeout;
+} AsyncInferCtx_t;
+
+static void async_infer_task(void *p)
+{
+    AsyncInferCtx_t *ctx = (AsyncInferCtx_t *)p;
+    int rc = xRunInference(ctx->model, ctx->input, ctx->output, ctx->timeout);
+    if (ctx->cb) ctx->cb(ctx->model, ctx->output, rc);
+    zhio_free(ctx);
+}
+
+int xRunInferenceAsync(ModelHandle_t model, TensorHandle_t input, TensorHandle_t output,
+                       InferenceCallback_t cb, ZhiosTick_t timeout)
+{
+    if (!model || !input || !output) return ZHIO_E_INVAL;
+    AsyncInferCtx_t *ctx = (AsyncInferCtx_t *)zhio_malloc(sizeof(*ctx));
+    if (!ctx) return ZHIO_E_NOMEM;
+    ctx->model = model; ctx->input = input; ctx->output = output;
+    ctx->cb = cb; ctx->timeout = timeout;
+    ZhiosTaskHandle_t h;
+    ZhiosTaskParams_t tp;
+    memset(&tp, 0, sizeof(tp));
+    tp.name = "ainf"; tp.stack_size = 2048; tp.priority = 5;
+    tp.fn = async_infer_task; tp.param = ctx;
+    if (zhio_task_create(&h, &tp) != ZHIO_OK) {
+        zhio_log("[sched] xRunInferenceAsync FAILED: cannot create task");
+        zhio_free(ctx);
+        return ZHIO_E_NOMEM;
+    }
+    return ZHIO_OK;
+}
+
+/* ---------------- 批量推理 ---------------- */
+int xRunBatchInference(ModelHandle_t model, TensorHandle_t inputs[], TensorHandle_t outputs[],
+                       uint32_t batch_size, ZhiosTick_t timeout)
+{
+    if (!model || batch_size == 0 || batch_size > 32) return ZHIO_E_INVAL;
+    if (!inputs || !outputs) return ZHIO_E_INVAL;
+    uint32_t i;
+    for (i = 0; i < batch_size; i++) {
+        int rc = xRunInference(model, inputs[i], outputs[i], timeout);
+        if (rc != ZHIO_OK) return rc;
+    }
+    return ZHIO_OK;
+}
+
+/* ---------------- 绝对截止时刻推理 ---------------- */
+int xRunInferenceTimeout(ModelHandle_t model, TensorHandle_t input, TensorHandle_t output, ZhiosTick_t deadline)
+{
+    ZhiosTick_t now = zhio_get_tick();
+    ZhiosTick_t remain;
+    if (deadline <= now) return ZHIO_E_TIMEOUT;
+    remain = deadline - now;
+    return xRunInference(model, input, output, remain);
+}
