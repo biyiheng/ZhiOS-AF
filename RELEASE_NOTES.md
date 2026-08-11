@@ -91,15 +91,24 @@ docker compose run --rm e2e
 
 ## 6. 归档文件清单（release 分支）
 
-| 文件 | 说明 |
+> release 分支为**完整可独立部署快照**：除编排/脚本外，已纳入六层架构完整源码与根构建文件
+> （`Dockerfile`/`Makefile`/`CMakeLists.txt`/`cmake/`），确保从该分支全新克隆即可执行 `docker compose build` 与一键启动。
+
+| 文件 / 目录 | 说明 |
 | --- | --- |
 | `docker-compose.yml` | 单文件容器编排（9 服务） |
-| `tools/run_integration.sh` | 一键启动脚本（bash） |
-| `tools/run_integration.ps1` | 一键启动脚本（PowerShell） |
+| `tools/run_integration.sh` / `.ps1` | 一键启动脚本 |
 | `docker/` | 各模块 Dockerfile 与 harness |
+| `ai_kernel/security/firewall.c` + `include/` | firewall / e2e 服务构建所依赖的 C 源码与头文件 |
+| `Dockerfile` / `Makefile` / `CMakeLists.txt` / `cmake/` | tests / demo 服务构建依赖 |
+| `tools/zmonitor/` | monitor 服务挂载目录 |
+| `agent/ ai_kernel/ ai_service/ bsp/ capability/ comm/ hal/ kernel/ model_runtime/ rtos/ tests/ examples/` | 六层架构完整源码 |
 | `docs/部署操作手册.md` | 部署操作手册 |
 | `docs/agent控制软件技术文档.md` | Agent 控制软件技术文档 v1.1.0 |
-| `DEVELOPMENT_LOG.md` | 开发 / 自检 / 修复日志 |
+| `RELEASE_NOTES.md` / `DEVELOPMENT_LOG.md` | 发布说明 / 开发日志 |
+
+> 归档补充：v1.1.0 初始归档仅含编排与脚本，缺少 firewall/e2e 依赖的 C 源码与 `tools/zmonitor/`
+> 等，无法独立部署；已补齐完整源码（提交 `1313a94`）使其自洽。
 
 ---
 

@@ -442,3 +442,21 @@ cmake --build build
 | 修改 | `tools/agent_console/e2e_test.py`（新增回归-413 套件） |
 | 归档 | 初始化 git 仓库，创建 `release` 分支并提交 `67ef55b` |
 | 验证 | `e2e_test.py` 59/59 ALL PASS |
+
+### 14.5 归档自洽性核查与补齐（重要）
+- **核查发现**：v1.1.0 初始归档仅含编排/脚本/`docker/`/`tools/agent_console/`，但从该分支全新克隆后，
+  `docker-compose.yml` 中 **firewall / e2e** 服务（一键脚本 `run_integration.sh` 会构建）所依赖的
+  `ai_kernel/security/firewall.c` 与 `include/*.h` **不在分支内**，`tests/demo` 依赖的根 `Dockerfile`/`Makefile`、
+  `monitor` 挂载的 `tools/zmonitor/` 亦缺失 —— **初始归档无法独立部署**。
+- **修复**：将六层架构完整源码与根构建文件（`Dockerfile`/`Makefile`/`CMakeLists.txt`/`cmake/`）及
+  `tools/sim`、`tools/zmonitor`、`tools/ztest`、`docker-compose.modules.yml` 全部纳入 release 分支，
+  提交 `1313a94`（65 文件 / +6939 行），使 release 分支成为**完整可独立部署快照**。
+- 已核验：`ls-tree` 确认 firewall/e2e 依赖的 `firewall.c` 与 `include/*.h`、`tools/zmonitor/index.html`、
+  `trainer.py`、根 `Dockerfile`/`Makefile` 均已在分支内；`.gitignore` 排除缓存/数据库/构建产物，无敏感文件入库。
+
+### 14.6 本阶段（含归档补齐）提交记录
+| 提交 | 说明 |
+| --- | --- |
+| `67ef55b` | release: v1.1.0 单文件容器编排 + 一键端到端部署 |
+| `8331026` | docs: 记录第七阶段（部署手册/413回归测试/release归档） |
+| `1313a94` | release: 补齐完整源码，使 release 分支可独立部署 |
