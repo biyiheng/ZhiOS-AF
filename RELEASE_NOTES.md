@@ -71,6 +71,14 @@
 - **低内存稳定运行**：新增 `ZHIO_CFG_LOW_MEMORY` 低内存配置档案，一键压缩任务/Agent/队列/张量池（96KB→32KB）等容量；
   栈尺寸 `ZHIO_CFG_AUTO_AGENT_STACK`/`ZHIO_CFG_SUBAGENT_STACK` 改为可配置；默认与低内存两种配置交叉编译全部通过。
 
+### 2.9 GitHub Actions CI 稳定化 + release → main 合并
+- **CI 构建修复**：`Makefile` 增加 `-Itools/ztest` 头文件路径，解决 `ztest.h: No such file or directory`；`build_verify.sh` 改为 `bash` 显式调用并 `chmod +x`，解决权限拒绝。
+- **CI 单元测试修复**：`comm.c` 修正帧解码 CRC 计算长度（LEN 2B + TYPE 1B + 载荷），修复 `ZHIO_E_UNKNOWN`；`agent.c` 新增 `vAgentResetAll()` 槽位池复位以隔离测试（修复子 Agent 团队 `ZHIO_E_NOMEM`）。
+- **CI ARM 验证修复**：`build_verify.sh` 改用 `command -v` 解析 `arm-none-eabi-*` 绝对路径，规避工具链相对路径找不到；`verify_main.c` 结尾增加半主机 `SYS_EXIT`（`bkpt 0xAB`），`stress_sched.py` QEMU 命令行加 `-semihosting-config target=native`，解决压测超时崩溃。
+- **CI 仿真确定性修复**：`zhio_sim.py` 的 `agents` 用例固定随机种子并强制内置合成数据，保证训练/评估结果可复现（准确率稳定 ≥ 0.6），消除 CI 抖动。
+- **CI 结果**：`build-test` 任务（构建 / ZTEST 单元测试 / cppcheck / Python 仿真 / Agent E2E / 可部署性自检）全部通过；`arm-verify` 链接验证通过，QEMU Jitter 压测为长耗时步骤（见已知限制）。
+- **分支合并**：`release` 完整快照已合并至 `main`（`--allow-unrelated-histories`，统一采用 Apache-2.0 许可），main 与 release 内容一致。
+
 ---
 
 ## 3. 本版本修复的 Bug
@@ -98,6 +106,8 @@
 | 训练链路 | 5 个 Agent 测试准确率 0.90+（真实爬虫数据） |
 | `arm-none-eabi` 汇编链接验证 | `build_verify.sh` M7/M3 链接通过，向量表/符号核验正确 |
 | `tools/arm_eabi/stress_sched.py` | 语法/参数校验通过；本机无 QEMU 时正确报错并给出引导 |
+| GitHub Actions `build-test` | 构建 / ZTEST 单元测试 / cppcheck / Python 仿真 / Agent E2E / 可部署性自检 **全部通过** |
+| GitHub Actions `arm-verify` | M7/M3 链接验证通过；QEMU Jitter 压测为长耗时步骤（见已知限制） |
 
 > 说明：本机（Windows）未运行 Docker 引擎（WSL2 后端缺失），真实容器部署需在具备 Docker 的 WSL2/Linux 环境
 > 通过 `tools/run_wsl_deploy.sh` 或 `tools/run_integration.sh` 执行；端到端 + 压力流程已通过本地等价 `e2e_test.py` 验证。
@@ -149,6 +159,8 @@ docker compose run --rm e2e
 - 真实容器部署与跨架构（ARM MCU）编译需在具备 Docker 与交叉工具链的环境进行。
 - `stm32h755` / `mcxn947` BSP 可参照 `bsp/stm32h743` 补齐。
 - 云端适配器密钥通过环境变量注入，生产环境需按安全规范配置。
+- **CI 长耗时项（优化中）**：`arm-verify` 中的 QEMU Jitter 压测步骤单次运行耗时过长（受固件 UART 轮询写
+  与 QEMU 解释执行影响），后续将通过压缩采样次数/收紧单轮超时/改用真实开发板等方式缩短 CI 时长。
 
 ---
 
