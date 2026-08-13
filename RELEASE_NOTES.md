@@ -60,6 +60,17 @@
 - **GitHub 上传准备**：新增 `LICENSE`(Apache-2.0)、`CONTRIBUTING.md`、`SECURITY.md`、`.gitattributes`、`.github/workflows/ci.yml`（build/test/sim/e2e/cppcheck + arm-none-eabi 链接验证 + QEMU 压测）。
 - 新增《34-AI-Agent技术指标体系设计文档》：五大维度（硬件亲和性/代码生成质量/诊断精度/工具链协同/安全合规）+ 硬性门槛 + 自检对照 + 落实路径。
 
+### 2.8 模拟效率 + 线程流/进程卡死自愈 + 低内存稳定运行优化
+- **模拟运行效率**：`zhio_sim.py` 新增 `--offline` / `ZHIO_SIM_OFFLINE=1` 显式离线开关与快速 TCP 可达性探测，
+  离线/无外网时**零网络阻塞**立即回退内置合成数据（原离线需等 5s 超时）；消息总线改用 `deque`，队首出队 O(n)→**O(1)**；
+  修复 `_feature_sample` 死代码；`main` 输出墙钟耗时。实测 24 用例 / 54 断言 ALL PASS，总耗时 32ms。
+- **进程卡死自愈（AI 辅助决策）**：新增 `iAgentSupervise()`，周期巡检全部 Agent，对看门狗超时（卡死）的 Agent
+  **自动复位为 READY 并清零看门狗**、输出恢复日志，杜绝单个卡死进程阻塞调度。
+- **线程流/处理能力限流**：新增 `ZHIO_CFG_MAX_ASYNC_INFERENCE`（默认 8）异步推理并发闸门，超过在途上限返回 `ZHIO_E_BUSY`，
+  防止低配置下并发线程/内存爆炸；新增 `xInferenceSchedulerAudit()` 供 AI 决策与性能根因分析。
+- **低内存稳定运行**：新增 `ZHIO_CFG_LOW_MEMORY` 低内存配置档案，一键压缩任务/Agent/队列/张量池（96KB→32KB）等容量；
+  栈尺寸 `ZHIO_CFG_AUTO_AGENT_STACK`/`ZHIO_CFG_SUBAGENT_STACK` 改为可配置；默认与低内存两种配置交叉编译全部通过。
+
 ---
 
 ## 3. 本版本修复的 Bug

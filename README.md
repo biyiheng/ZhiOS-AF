@@ -113,6 +113,18 @@ python3 tools/arm_eabi/stress_sched.py --build --runs 20   # 自动化压测，�
 工具链协同 / 安全合规 五大维度）的指标、硬性门槛与落实路径见
 《[34-AI-Agent技术指标体系设计文档](../docs/34-AI-Agent技术指标体系设计文档.md)》。
 
+## 运行效率与低内存优化
+
+- **模拟效率**：`python tools/sim/zhio_sim.py --offline` 显式离线（或设
+  `ZHIO_SIM_OFFLINE=1`）可跳过网络抓取、零阻塞立即回退内置合成数据；消息总线
+  `deque` 使队首出队为 O(1)。实测 24 用例 / 54 断言 ALL PASS，总耗时约 32ms。
+- **进程卡死自愈（AI 辅助决策）**：周期调用 `iAgentSupervise()`，对看门狗超时
+  （卡死）的 Agent 自动复位为 READY 并清零看门狗，杜绝单个卡死进程阻塞调度。
+- **异步推理限流**：`ZHIO_CFG_MAX_ASYNC_INFERENCE` 控制并发在途异步推理数，超过返回
+  `ZHIO_E_BUSY`，防止低配置下线程/内存爆炸；`xInferenceSchedulerAudit()` 提供调度审计。
+- **低内存档案**：在 `include/zhios_config.h` 设置 `ZHIO_CFG_LOW_MEMORY=1` 即可一键压缩
+  任务/Agent/队列/张量池等容量（默认 96KB → 低配 32KB），在低 RAM MCU 上最大化稳定运行。
+
 ## 发布说明（Release）
 
 当前版本 **v1.1.0**，归档于 `release` 分支（完整可独立部署快照）。详见

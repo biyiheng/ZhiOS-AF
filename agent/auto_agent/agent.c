@@ -214,3 +214,26 @@ uint32_t ulAgentDecisionCount(AgentHandle_t agent)
     AutoAgent_t *a = resolve(agent);
     return a ? a->decision_count : 0;
 }
+
+/* 监督巡检：检测并自愈"卡死"（看门狗超时）的 Agent */
+int iAgentSupervise(void)
+{
+    uint32_t i, recovered = 0;
+    ZhiosTick_t now = zhio_get_tick();
+    for (i = 0; i < ZHIO_MAX_AGENT_SLOTS; i++) {
+        AutoAgent_t *a = &g_agents[i];
+        if (!a->valid || a->wd_period == 0) continue;
+        /* 看门狗超时判定（回绕安全） */
+        if ((now - a->wd_last_feed) > a->wd_period) {
+            zhio_log("[agent] SUPERVISE: agent[%u]='%s' STALLED (wd=%u ms since feed=%u) -> recovering",
+                     (unsigned)i, a->name, (unsigned)a->wd_period,
+                     (unsigned)(now - a->wd_last_feed));
+            /* 自愈：复位状态与看门狗，避免单个卡死进程阻塞调度 */
+            a->state = ZHIO_AGENT_READY;
+            a->wd_last_feed = now;
+            recovered++;
+        }
+    }
+    if (recovered) zhio_log("[agent] SUPERVISE: recovered %u stalled agent(s)", (unsigned)recovered);
+    return (int)recovered;
+}

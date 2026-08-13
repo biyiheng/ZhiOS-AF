@@ -624,3 +624,60 @@ cmake --build build
 | --- | --- |
 | 新增 | `tools/arm_eabi/*`（`verify_flash.ld`/`verify_main.c`/`build_verify.sh`/`build_verify.ps1`/`stress_sched.py`/`README.md`）、`LICENSE`、`CONTRIBUTING.md`、`SECURITY.md`、`.gitattributes`、`.github/workflows/ci.yml`、`docs/34-AI-Agent技术指标体系设计文档.md` |
 | 修改 | `ai_kernel/tensor_mem/tensor_mem.c`（`ZHIO_CFG_MEM_TRACE`）、`kernel/kernel.c`、`ai_kernel/npu_dsp/npu_dsp.c`、`agent/message_bus/message_bus.c`、`rtos/host/zhio_rtos_port.c`（模块说明头块）、`README.md`、`RELEASE_NOTES.md`、`DEVELOPMENT_LOG.md` |
+
+---
+
+## 18. 第十一阶段：模拟运行效率 + 线程流/AI 决策对进程卡死自愈 + 低内存优化（2026-08-12）
+
+### 18.1 模拟运行效率检测与优化（zhio_sim.py）
+- **检测发现**：①离线/无外网时 `acquire_data()` 对每个数据源 `urlopen(timeout=5)` 阻塞等待，
+  使模拟在无外网环境无谓等待数秒；②`MessageBus.receive()` 用 `list.pop(0)` 为 O(n)；
+  ③`_feature_sample()` 生成 f1/f2 后又被 `_label_sample()` 重新生成（死代码）。
+- **优化**：
+  - 新增 `--offline` 命令行开关 / `ZHIO_SIM_OFFLINE=1` 环境变量，显式离线时**立即**使用内置合成数据，零网络阻塞；
+  - 非显式离线时先做**快速 TCP 可达性探测**（`_net_reachable`），不可达立即跳过，并将下载超时 5s→3s；
+  - `MessageBus` 改用 `collections.deque`，队首出队由 O(n) 降为 **O(1)**；
+  - 修复 `_feature_sample` 死代码（生成的 f1/f2 直接用于打标签）；
+  - `main()` 输出墙钟耗时与离线标志。
+- **实测**：24 用例 / **54 断言 ALL PASS**，总耗时 **32ms**；消息总线 2 万条出队 1063μs（0.05μs/条）；
+  离线数据获取 0.1ms（无阻塞）。
+
+### 18.2 线程流 / 处理能力 / AI 决策对"进程卡死"的优化
+- **检测发现**：①`agent.c` 已有看门狗喂狗与 `zhio_agent_watchdog_expired()` 判定，但**没有任何地方
+  "恢复"卡死的 Agent** —— 单个 Agent 失去响应会持续占用槽位、阻塞上层；②异步推理 `xRunInferenceAsync`
+  每次调用创建一个 pthread，**无并发上限**，低配置下并发推理可能耗尽线程/内存导致卡死或 OOM。
+- **优化**：
+  - **Agent 监督巡检（AI 辅助决策自愈）**：新增 `iAgentSupervise()`（`agent.h`/`agent.c`）—— 遍历全部 Agent，
+    对看门狗超时（视为卡死）的 Agent **自动复位状态为 READY 并清零看门狗**、输出恢复日志，返回本次恢复数量；
+    由主循环/低优先级巡检任务周期调用，杜绝"单个卡死进程阻塞调度"。
+  - **异步推理并发闸门（线程流限流）**：新增 `ZHIO_CFG_MAX_ASYNC_INFERENCE`（默认 8 / 低配 2），
+    在调度器初始化时创建计数信号量，`xRunInferenceAsync` 先取闸门（超时失败返回 `ZHIO_E_BUSY` 并清理 ctx），
+    异步任务完成后归还闸门 —— 限制在途异步推理线程数，防止线程/内存爆炸。
+  - **调度器审计 API**：新增 `xInferenceSchedulerAudit()`（`inference_scheduler.h/.c`）—— 返回最坏决策周期、
+    累计决策次数、异步并发上限，供 AI 辅助决策与性能退化根因分析使用。
+  - 演示程序 `demo_main.c` 接入 `iAgentSupervise()` 验证自愈路径。
+
+### 18.3 内存占用与性能优化（低配置最大化稳定运行）
+- **检测发现**：容量与栈尺寸硬编码/与平台无关，低 RAM MCU 无统一裁剪入口。
+- **优化**：
+  - `zhios_config.h` 新增 **`ZHIO_CFG_LOW_MEMORY` 低内存配置档案**（默认 0）：
+    开启后自动把 `ZHIO_CFG_MAX_INFERENCE_TASKS`(32→8)、`ZHIO_CFG_MAX_AGENTS`(8→4)、
+    `ZHIO_CFG_AGENT_QUEUE_DEPTH`(256→64)、`ZHIO_CFG_MAX_ASYNC_INFERENCE`(8→2)、
+    `ZHIO_CFG_TENSOR_POOL_BYTES`(96KB→32KB) 压缩到保守值，降低静态数组/队列/张量池内存占用；
+  - 新增可覆盖的栈尺寸 `ZHIO_CFG_AUTO_AGENT_STACK`(2048)/`ZHIO_CFG_SUBAGENT_STACK`(1024)，
+    `demo_main.c` 改从配置读取，不再硬编码；
+  - 在低内存档案 + 全功能两种配置下分别做交叉编译验证，全部通过。
+
+### 18.4 验证汇总（本阶段）
+| 项 | 结果 |
+| --- | --- |
+| `python zhi-os-af/tools/sim/zhio_sim.py --offline` | **24 用例 / 54 断言 ALL PASS**，32ms |
+| 消息总线大批量出队 | 2 万条 1063μs（deque O(1)） |
+| 离线数据获取 | 0.1ms 零网络阻塞（`--offline`/环境变量/可达性探测） |
+| 交叉编译（默认配置） | `agent.c`/`inference_scheduler.c`/`demo_main.c` `-fsyntax-only` 全过，0 警告 |
+| 交叉编译（低内存配置） | 8 个核心 C 文件 `-DZHIO_CFG_LOW_MEMORY=1 -fsyntax-only` 全过 |
+
+### 18.5 本阶段新增/修改文件
+| 类型 | 文件 |
+| --- | --- |
+| 修改 | `tools/sim/zhio_sim.py`（离线开关/可达性探测/deque/死代码修复/计时/效率自检用例）、`include/zhios_config.h`（低内存档案+栈尺寸+异步并发上限）、`include/agent.h`+`agent/auto_agent/agent.c`（`iAgentSupervise`）、`include/inference_scheduler.h`+`ai_kernel/inference_scheduler/inference_scheduler.c`（并发闸门+审计+注释修复）、`examples/demo_main.c`（配置栈尺寸+监督巡检演示）、`README.md`、`RELEASE_NOTES.md`、`DEVELOPMENT_LOG.md` |

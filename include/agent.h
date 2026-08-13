@@ -66,6 +66,14 @@ int  iAgentSetBehavior(AgentHandle_t agent, const AgentBehavior_t *behavior, Sub
 int      iAgentRunStep(AgentHandle_t agent);
 uint32_t ulAgentDecisionCount(AgentHandle_t agent);
 
+/* 监督巡检（AI 辅助决策，进程卡死自愈）
+ * 遍历全部 Agent：若某 Agent 看门狗超时（视为卡死/失去响应），则将其状态
+ * 重置回 ZHIO_AGENT_READY、清零其看门狗计时并输出恢复日志，使系统可继续
+ * 调度而不被单个卡死进程阻塞。返回本次恢复（被重置）的 Agent 数量。
+ * 应由主循环/低优先级巡检任务周期调用（周期取各 Agent 看门狗上限的公共值）。
+ */
+int iAgentSupervise(void);
+
 /* 能力偏好访问（供 capability 引擎使用） */
 int iAgentSetCapability(AgentHandle_t agent, const CapabilityPreference_t *pref);
 int iAgentGetCapability(AgentHandle_t agent, CapabilityPreference_t *pref);

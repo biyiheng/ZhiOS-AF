@@ -62,6 +62,10 @@ int  xInferenceTaskGetTCB(int task_id, InferenceTaskTCB_t *out);
 /* 统计：抖动用 exec_ticks 与 ran_count 计算 */
 int  xInferenceSchedulerStats(int task_id, uint32_t *ran, uint32_t *miss);
 
+/* 调度器审计（供 AI 辅助决策与性能分析）：最坏决策周期/累计决策次数/异步并发上限 */
+int  xInferenceSchedulerAudit(uint32_t *worst_cycles, uint32_t *decision_count,
+                              uint32_t *async_capacity);
+
 /* ================= 内核推理执行 API（对应文档 17 第 4 节） ================= */
 typedef void (*InferenceCallback_t)(ModelHandle_t model, TensorHandle_t output, int result);
 

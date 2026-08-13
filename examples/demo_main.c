@@ -34,10 +34,16 @@ int main(void)
     zhio_system_init();
     zhio_cloud_transport_set(mock_transport);   /* 演示用 mock 云端 */
 
-    /* 1) 创建 Auto 主 Agent 与子 Agent 团队 */
-    AgentHandle_t auto_agent = xCreateAutoAgent("auto", 2048, 6);
+    /* 1) 创建 Auto 主 Agent 与子 Agent 团队（栈尺寸由 zhios_config 提供，低配可裁剪） */
+    AgentHandle_t auto_agent = xCreateAutoAgent("auto", ZHIO_CFG_AUTO_AGENT_STACK, 6);
     if (!auto_agent) { printf("create auto agent failed\n"); return 1; }
-    iSubAgentsCreateTeam(auto_agent, 1024, 4);
+    iSubAgentsCreateTeam(auto_agent, ZHIO_CFG_SUBAGENT_STACK, 4);
+
+    /* 1.1) 启动 Agent 看门狗，并做一次监督巡检（验证进程卡死自愈路径） */
+    iAgentWatchdogStart(auto_agent, 100);
+    xAgentWatchdogFeed(auto_agent);
+    int recovered = iAgentSupervise();
+    printf("[demo] agent supervise: recovered=%d (0 表示无卡死)\n", recovered);
 
     /* 2) 关键词配置能力偏好 */
     const char *kws[] = {"谨慎模式", "视觉优先", "允许云端"};

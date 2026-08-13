@@ -8,7 +8,8 @@
  *             是 Agent 自治层与底层推理内核之间的调度网关。
  * 依赖      ：model_runtime（模型执行）、security（安全校验）、tensor_mem（张量）、
  *             zhios_rtos（FreeRTOS/host 抽象）。
- * 被谁调用  ：agent/*、capability/*、ai_service/*，以及外部通过 include/inference_scheduler.h。
+ * 被谁调用  ：agent 模块、capability 模块、ai_service 模块，以及外部通过
+ *             include/inference_scheduler.h 调用。
  * 算法      ：EDF（最早截止期）+ 固定优先级抢占 的混合选择
  *             （详见下方"算法与复杂度"注释）。
  * 实时性指标：对应《33-操作系统技术指标体系设计文档》"内核调度"维度。
@@ -45,6 +46,8 @@
 static InferenceTaskTCB_t g_tasks[ZHIO_CFG_MAX_INFERENCE_TASKS];
 static uint32_t g_sched_inited = 0;
 static uint32_t g_sched_worst_cycles = 0;   /* 单次调度决策最坏周期数（抖动分析） */
+static uint32_t g_sched_decision_count = 0; /* 累计调度决策次数（审计） */
+static ZhiosSemHandle_t g_async_gate = NULL; /* 异步推理并发闸门（限流防线程爆炸） */
 
 /* 平台周期计数：Cortex-M 用 DWT->CYCCNT，其余回退到 tick（用于相对估算） */
 static inline uint32_t sched_cycles_now(void)
@@ -61,9 +64,24 @@ int iInferenceSchedulerInit(void)
 {
     memset(g_tasks, 0, sizeof(g_tasks));
     g_sched_inited = 1;
+    g_sched_worst_cycles = 0;
+    g_sched_decision_count = 0;
+    /* 初始化异步推理并发闸门：容量 = ZHIO_CFG_MAX_ASYNC_INFERENCE */
+    if (!g_async_gate) {
+        g_async_gate = zhio_sem_create();
+        if (g_async_gate) {
+            uint32_t i;
+            for (i = 0; i < ZHIO_CFG_MAX_ASYNC_INFERENCE; i++) zhio_sem_give(g_async_gate);
+        }
+    }
     return ZHIO_OK;
 }
-void vInferenceSchedulerDeinit(void) { memset(g_tasks, 0, sizeof(g_tasks)); g_sched_inited = 0; }
+void vInferenceSchedulerDeinit(void)
+{
+    memset(g_tasks, 0, sizeof(g_tasks));
+    g_sched_inited = 0;
+    if (g_async_gate) { zhio_free(g_async_gate); g_async_gate = NULL; }
+}
 
 int xCreateInferenceTask(const char *name, uint32_t priority,
                          ZhiosTick_t deadline_ticks, ZhiosTick_t period_ticks,
@@ -151,6 +169,7 @@ int xInferenceSchedulerGetNext(int *next_id)
         }
     }
 #endif
+    g_sched_decision_count++;
     *next_id = best;
     if (best >= 0) {
         zhio_log("[sched] next task selected: id=%d prio=%u deadline=%u",
@@ -183,6 +202,17 @@ int xInferenceSchedulerStats(int task_id, uint32_t *ran, uint32_t *miss)
     if (task_id < 0 || task_id >= (int)ZHIO_CFG_MAX_INFERENCE_TASKS) return ZHIO_E_INVAL;
     if (ran) *ran = g_tasks[task_id].ran_count;
     if (miss) *miss = g_tasks[task_id].deadline_miss_count;
+    return ZHIO_OK;
+}
+
+/* 调度器审计：汇总最坏决策周期/累计决策次数/并发上限，供 AI 辅助决策与性能分析 */
+int xInferenceSchedulerAudit(uint32_t *worst_cycles, uint32_t *decision_count,
+                             uint32_t *async_capacity)
+{
+    if (!g_sched_inited) return ZHIO_E_INVAL;
+    if (worst_cycles)    *worst_cycles    = g_sched_worst_cycles;
+    if (decision_count)  *decision_count  = g_sched_decision_count;
+    if (async_capacity)  *async_capacity  = ZHIO_CFG_MAX_ASYNC_INFERENCE;
     return ZHIO_OK;
 }
 
@@ -260,6 +290,8 @@ static void async_infer_task(void *p)
     AsyncInferCtx_t *ctx = (AsyncInferCtx_t *)p;
     int rc = xRunInference(ctx->model, ctx->input, ctx->output, ctx->timeout);
     if (ctx->cb) ctx->cb(ctx->model, ctx->output, rc);
+    /* 释放并发闸门，允许下一个异步推理进入 */
+    if (g_async_gate) zhio_sem_give(g_async_gate);
     zhio_free(ctx);
 }
 
@@ -267,8 +299,20 @@ int xRunInferenceAsync(ModelHandle_t model, TensorHandle_t input, TensorHandle_t
                        InferenceCallback_t cb, ZhiosTick_t timeout)
 {
     if (!model || !input || !output) return ZHIO_E_INVAL;
+
+    /* 并发闸门限流：超过 ZHIO_CFG_MAX_ASYNC_INFERENCE 个在途异步推理则拒绝，
+     * 避免低配置环境下线程/内存被并发推理耗尽而卡死或 OOM。 */
+    if (g_async_gate && zhio_sem_take(g_async_gate, 1) != ZHIO_OK) {
+        zhio_log("[sched] xRunInferenceAsync BUSY: async concurrency limit (%u) reached",
+                 ZHIO_CFG_MAX_ASYNC_INFERENCE);
+        return ZHIO_E_BUSY;
+    }
+
     AsyncInferCtx_t *ctx = (AsyncInferCtx_t *)zhio_malloc(sizeof(*ctx));
-    if (!ctx) return ZHIO_E_NOMEM;
+    if (!ctx) {
+        if (g_async_gate) zhio_sem_give(g_async_gate);
+        return ZHIO_E_NOMEM;
+    }
     ctx->model = model; ctx->input = input; ctx->output = output;
     ctx->cb = cb; ctx->timeout = timeout;
     ZhiosTaskHandle_t h;
@@ -278,6 +322,7 @@ int xRunInferenceAsync(ModelHandle_t model, TensorHandle_t input, TensorHandle_t
     tp.fn = async_infer_task; tp.param = ctx;
     if (zhio_task_create(&h, &tp) != ZHIO_OK) {
         zhio_log("[sched] xRunInferenceAsync FAILED: cannot create task");
+        if (g_async_gate) zhio_sem_give(g_async_gate);
         zhio_free(ctx);
         return ZHIO_E_NOMEM;
     }
