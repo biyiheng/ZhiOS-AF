@@ -46,8 +46,12 @@ static void uart_init(void)
 
 static void uart_putc(char c)
 {
+    /* QEMU 的 CMSDK UART 模型会把 TX-FULL 位长期置位（无流控），若沿用 100000 次
+       轮询，每次写字符都会空转 10 万次，压测固件将打印约 1.4 万字符/轮 × 20 轮，
+       使 CI 单步耗时达 35 分钟以上。改为轻量轮询：真机上 TXE 清空很快会提前退出，
+       QEMU 下则把空转量从 10^5 降到 10^3，压测耗时降低约两个数量级。 */
     int i;
-    for (i = 0; i < 100000; i++) {   /* 轮询 TX FIFO 空 */
+    for (i = 0; i < 1000; i++) {     /* 轻量轮询 TX FIFO 空 */
         if (!(UART_STATE & STATE_TX_BUFFER_FULL)) break;
     }
     UART_DATA = (uint32_t)(unsigned char)c;

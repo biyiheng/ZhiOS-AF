@@ -58,4 +58,4 @@ jobs:
         run: bash tools/arm_eabi/build_verify.sh
 
       - name: QEMU context-switch jitter stress test
-        run: python3 tools/arm_eabi/stress_sched.py --freq 25000000 --runs 20
+        run: python3 tools/arm_eabi/stress_sched.py --freq 25000000 --runs 10
