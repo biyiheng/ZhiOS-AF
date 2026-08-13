@@ -681,3 +681,9 @@ cmake --build build
 | 类型 | 文件 |
 | --- | --- |
 | 修改 | `tools/sim/zhio_sim.py`（离线开关/可达性探测/deque/死代码修复/计时/效率自检用例）、`include/zhios_config.h`（低内存档案+栈尺寸+异步并发上限）、`include/agent.h`+`agent/auto_agent/agent.c`（`iAgentSupervise`）、`include/inference_scheduler.h`+`ai_kernel/inference_scheduler/inference_scheduler.c`（并发闸门+审计+注释修复）、`examples/demo_main.c`（配置栈尺寸+监督巡检演示）、`README.md`、`RELEASE_NOTES.md`、`DEVELOPMENT_LOG.md` |
+
+### 18.6 回归测试报告
+- 详细性能优化回归测试报告（含性能对比数据与分支健康检查）见
+  [docs/35-性能优化回归测试报告.md](docs/../docs/35-性能优化回归测试报告.md)。
+- 分支健康检查结论：`release` 分支（HEAD `6893978`）工作区干净、无未合并路径、无冲突标记、
+  `git fsck` 通过、编译 0 警告，可安全推送；推送前需先配置远程仓库。
