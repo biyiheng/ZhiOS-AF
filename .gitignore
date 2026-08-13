@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# SQLite 数据库（运行时生成）
+*.db
+*.sqlite3
+
+# 临时 / 日志
+*.log
+.tmp/
+tmp/
+
+# 构建产物
+build/
+cmake-build-*/
+*.o
+*.elf
+*.bin
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, release ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    name: Build + Unit Test + Simulation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make gcc cmake cppcheck
+
+      - name: Host build (Makefile)
+        run: make
+
+      - name: Host unit tests (ZTEST)
+        run: make test
+
+      - name: "Static analysis (cppcheck, D2: MISRA/CERT-C baseline)"
+        run: |
+          cppcheck --enable=warning,style,performance,portability --std=c99 \
+            --error-exitcode=0 --suppress=missingIncludeSystem \
+            --inline-suppr -I include -I hal -I kernel -I ai_kernel \
+            hal hal_host.c kernel kernel.c ai_kernel model_runtime agent ai_service 2>&1 || true
+          echo "(启用 cppcheck-misra/cert addons 可在 CI 中进一步强化 D2 门槛)"
+
+      - name: Python logic simulation
+        run: python3 tools/sim/zhio_sim.py
+
+      - name: Agent console E2E (in-process)
+        run: python3 tools/agent_console/e2e_test.py
+
+      - name: Release deployability self-check
+        run: python3 tools/verify_release.py
+
+  arm-verify:
+    name: ARM-EABI Link Verify + QEMU Jitter Stress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arm-none-eabi + QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi qemu-system-arm
+          arm-none-eabi-gcc --version
+          qemu-system-arm --version
+
+      - name: Link verify startup/context-switch assembly (M7 + M3)
+        run: bash tools/arm_eabi/build_verify.sh
+
+      - name: QEMU context-switch jitter stress test
+        run: python3 tools/arm_eabi/stress_sched.py --freq 25000000 --runs 20

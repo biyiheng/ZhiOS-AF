@@ -1,0 +1,10 @@
+# 构建忽略文件
+*.o
+*.obj
+build/
+bin/
+out/
+.git/
+__pycache__/
+*.pyc
+.venv/

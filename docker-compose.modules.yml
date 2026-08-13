@@ -1,0 +1,28 @@
+# ZhiOS-AF 独立安全/驱动模块部署编排
+#
+# 将"修复后的防火墙逻辑"与"UART 环形缓冲驱动"封装为独立 Docker 镜像，
+# 便于在隔离环境验证其逻辑正确性并复用部署。
+#
+# 用法：
+#   docker compose -f docker-compose.modules.yml build
+#   docker compose -f docker-compose.modules.yml run --rm firewall
+#   docker compose -f docker-compose.modules.yml run --rm driver
+#   （或 docker compose -f docker-compose.modules.yml up）
+version: "3.9"
+
+services:
+  # 通信防火墙：默认拒绝 + 白名单 + 源白名单 + 长度上限 + 令牌桶限速
+  firewall:
+    build:
+      context: .
+      dockerfile: docker/security/Dockerfile
+    image: zhi-af/firewall:latest
+    restart: "no"
+
+  # UART 环形缓冲驱动：非阻塞接收，验证 FIFO/满丢弃/回绕
+  driver:
+    build:
+      context: .
+      dockerfile: docker/driver/Dockerfile
+    image: zhi-af/uart-driver:latest
+    restart: "no"
