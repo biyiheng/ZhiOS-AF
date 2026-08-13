@@ -75,7 +75,7 @@ int comm_frame_decode(const uint8_t *buf, uint16_t buf_len, ZhiosFrame_t *frame)
         const uint8_t *c = &buf[4 + len];
         expected = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | ((uint32_t)c[3] << 24);
     }
-    uint32_t calc = comm_crc32(&buf[1], (uint32_t)(1 + len + 1)); /* LEN+TYPE+载荷 */
+    uint32_t calc = comm_crc32(&buf[1], (uint32_t)(2 + 1 + len)); /* LEN(2B)+TYPE(1B)+载荷(len) */
     if (calc != expected) return ZHIO_E_UNKNOWN;   /* CRC 不匹配 */
     frame->crc32 = expected;
     frame->eof = buf[total - 1];

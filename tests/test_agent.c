@@ -22,6 +22,7 @@
 /* ---------- 能力偏好引擎（关键词配置） ---------- */
 static void test_capability_keywords(void)
 {
+    vAgentResetAll();
     iCapabilityInit();
     AgentHandle_t a = xCreateAutoAgent("auto", 1024, 5);
     ZTEST_ASSERT_NOT_NULL(a);
@@ -38,6 +39,7 @@ static void test_capability_keywords(void)
 
 static void test_capability_safety_level(void)
 {
+    vAgentResetAll();
     iCapabilityInit();
     AgentHandle_t a = xCreateAutoAgent("auto2", 1024, 5);
     ZTEST_ASSERT_NOT_NULL(a);
@@ -52,6 +54,7 @@ static void test_capability_safety_level(void)
 /* ---------- 消息总线 ---------- */
 static void test_message_bus(void)
 {
+    vAgentResetAll();
     iMessageBusInit();
     AgentHandle_t a = xCreateAutoAgent("src", 1024, 5);
     AgentHandle_t b = xCreateAutoAgent("dst", 1024, 5);
@@ -66,6 +69,7 @@ static void test_message_bus(void)
 /* ---------- 子 Agent 团队 + 步进 ---------- */
 static void test_sub_agent_team(void)
 {
+    vAgentResetAll();
     iMessageBusInit();
     iCapabilityInit();
     AgentHandle_t auto_a = xCreateAutoAgent("auto", 2048, 6);
@@ -78,6 +82,7 @@ static void test_sub_agent_team(void)
 /* ---------- config agent 命令 ---------- */
 static void test_config_command(void)
 {
+    vAgentResetAll();
     iCapabilityInit();
     iMessageBusInit();
     AgentHandle_t a = xCreateAutoAgent("auto", 1024, 5);

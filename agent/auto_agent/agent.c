@@ -103,6 +103,16 @@ void vDeleteAgent(AgentHandle_t agent)
     memset(a, 0, sizeof(*a));
 }
 
+/* 复位整个 Agent 槽位池（测试隔离用）：清空全部槽位与消息队列 */
+void vAgentResetAll(void)
+{
+    uint32_t i;
+    for (i = 0; i < ZHIO_MAX_AGENT_SLOTS; i++) {
+        if (g_agents[i].inbox) zhio_queue_reset(g_agents[i].inbox);
+        memset(&g_agents[i], 0, sizeof(g_agents[i]));
+    }
+}
+
 AgentState_t eAgentGetState(AgentHandle_t agent)
 {
     AutoAgent_t *a = resolve(agent);

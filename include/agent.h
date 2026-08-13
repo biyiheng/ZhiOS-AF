@@ -56,6 +56,7 @@ void xAgentWatchdogFeed(AgentHandle_t agent);
 
 /* 生命周期/查询 */
 void          vDeleteAgent(AgentHandle_t agent);
+void          vAgentResetAll(void);   /* 复位整个 Agent 槽位池（测试隔离） */
 AgentState_t  eAgentGetState(AgentHandle_t agent);
 int           iAgentRegisterSub(AgentHandle_t parent, AgentHandle_t sub);
 

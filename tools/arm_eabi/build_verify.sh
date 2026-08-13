@@ -27,10 +27,10 @@ mkdir -p "$OUT_DIR"
 # ---- 定位 arm-none-eabi-gcc ----
 find_gcc() {
     if [ -n "${ARM_GCC:-}" ] && command -v "$ARM_GCC" >/dev/null 2>&1; then
-        echo "$ARM_GCC"; return
+        command -v "$ARM_GCC"; return
     fi
     if command -v arm-none-eabi-gcc >/dev/null 2>&1; then
-        echo "arm-none-eabi-gcc"; return
+        command -v arm-none-eabi-gcc; return
     fi
     # STM32CubeIDE 内嵌工具链（Windows/PowerShell 常见路径，PWD 形如 C:/...）
     for p in \
