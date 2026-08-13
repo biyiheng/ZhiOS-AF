@@ -50,7 +50,9 @@ BUILD_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 def run_qemu(qemu, elf, freq_hz, timeout):
     """运行一次 QEMU，返回切换周期样本列表与固件汇总字典。"""
     cmd = [qemu, "-M", "mps2-an385", "-cpu", "cortex-m3",
-           "-nographic", "-serial", "stdio", "-monitor", "none", "-kernel", elf]
+           "-nographic", "-serial", "stdio", "-monitor", "none",
+           "-semihosting-config", "enable=on,target=native",
+           "-kernel", elf]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     out = proc.stdout or ""
     samples = [int(m.group(1)) for m in SW_RE.finditer(out)]

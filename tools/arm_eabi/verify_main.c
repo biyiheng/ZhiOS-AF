@@ -110,6 +110,26 @@ static int atomic_selfcheck(void)
 /* ---- SystemInit：startup_stm32h743.s 复位流程调用（QEMU 下为空实现） ---- */
 void SystemInit(void) { }
 
+/* ---- 半主机退出：打印完结果后通知 QEMU 正常终止（SYS_EXIT） ----
+ * 固件结尾若进入死循环则 QEMU 永不退出，压测脚本会因 30s 超时崩溃；
+ * 通过 ARM Angel 半主机 SYS_EXIT(0x18) 让 QEMU 在输出完整结果后立即
+ * 干净退出（配合 QEMU 命令行 -semihosting-config enable=on,target=native）。
+ * 链接验证（不运行 QEMU）下该调用仅被链接，不产生副作用。
+ */
+static void semihost_exit(void)
+{
+    /* reason=ADP_Stopped_ApplicationExit(0x20026), subcode=0 —— SYS_EXIT 参数块 */
+    static const uint32_t block[2] = { 0x20026u, 0u };
+    register uint32_t r1 asm("r1") = (uint32_t)(uintptr_t)&block;
+    __asm__ volatile(
+        "mov r0, #0x18\n\t"   /* SYS_EXIT */
+        "bkpt 0xAB\n\t"       /* 半主机断点 */
+        :
+        : "r"(r1)
+        : "r0", "memory");
+    for (;;) { }
+}
+
 /* ---- main：链接验证时由启动代码调用；QEMU 下执行压测采样 ---- */
 int main(void)
 {
@@ -142,7 +162,7 @@ int main(void)
     uart_putc('\n');
     uart_puts("[verify] DONE\n");
 
-    /* 链接验证/仿真完成后挂起；真机可在此进入低功耗或复位。 */
-    for (;;) { barrier_mem(); }
+    /* 通知 QEMU 半主机退出，使压测脚本可完整捕获输出并干净结束本轮 */
+    semihost_exit();
     return 0;
 }
