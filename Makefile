@@ -9,7 +9,7 @@
 
 CC      ?= cc
 CFLAGS  ?= -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter \
-	-Iinclude -Iagent/sub_agents -Iai_service/cloud -Iai_service/cloud/adapters -pthread
+	-Iinclude -Iagent/sub_agents -Iai_service/cloud -Iai_service/cloud/adapters -Itools/ztest -pthread
 LDFLAGS ?= -pthread
 
 CORE_SRCS = \
